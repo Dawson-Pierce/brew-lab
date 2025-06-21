@@ -14,18 +14,30 @@ classdef (Abstract) DynamicsBase < handle
         stateNames
     end
 
+    properties 
+        M = []
+    end
+
     methods (Abstract)
         nextState = propagateState(obj, timestep, dt, state, u)
-        stateMat = getStateMat(obj, timestep, dt, varargin)
-        inputMat = getInputMat(obj, timestep, dt, varargin)
+        stateMat = getStateMat(obj, timestep, dt, state, varargin)
+        inputMat = getInputMat(obj, timestep, dt, state, varargin)
     end
 
     methods
+        function setRotationModel(obj,M)
+            obj.M = M;
+        end
         function new_extent = propagate_extent(obj, dt, state, extent)
-            new_extent = extent; 
-        end
-        function rotated_extent = rotate_extent(obj, dt, state, extent)
-            rotated_extent = extent; 
-        end
+            if ~isempty(obj.M)
+                if isa(obj.M,'function_handle')
+                    new_extent = obj.M(state,dt) * extent * obj.M(state,dt)';
+                else
+                    new_extent = obj.M * extent * obj.M';
+                end
+            else
+                new_extent = extent;
+            end
+        end 
     end
 end 

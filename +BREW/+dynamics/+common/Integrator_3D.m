@@ -4,6 +4,9 @@ classdef Integrator_3D < BREW.dynamics.DynamicsBase
     end
     methods
         function nextState = propagateState(obj, timestep, dt, state, u)
+            if nargin < 5 || isempty(u)
+                u = [0 0 0]';
+            end
             F = obj.getStateMat(timestep,dt,state);
             G = obj.getInputMat(timestep,dt,state);
             nextState = F*state + G*u;

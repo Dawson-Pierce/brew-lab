@@ -157,7 +157,7 @@ classdef GGIW < BREW.distributions.BaseSingleModel
                 X = reshape(ellipsoid_pts(1,:), size(x));
                 Y = reshape(ellipsoid_pts(2,:), size(y));
                 Z = reshape(ellipsoid_pts(3,:), size(z));
-                surf(ax, X, Y, Z, 'FaceAlpha', 0.3, 'EdgeColor', color,'EdgeAlpha',0.3, 'LineStyle', '--', 'FaceColor', color, 'DisplayName', 'mean extent');
+                surf(ax, real(X), real(Y), real(Z), 'FaceAlpha', 0.3, 'EdgeColor', color,'EdgeAlpha',0.3, 'LineStyle', '--', 'FaceColor', color, 'DisplayName', 'mean extent');
                 scale = sqrt(chi2inv(h, 3));
                 conf_extent = mean_extent * scale^2;
                 [Vconf, Dconf] = eig(conf_extent);
@@ -165,7 +165,7 @@ classdef GGIW < BREW.distributions.BaseSingleModel
                 Xc = reshape(ellipsoid_pts_conf(1,:), size(x));
                 Yc = reshape(ellipsoid_pts_conf(2,:), size(y));
                 Zc = reshape(ellipsoid_pts_conf(3,:), size(z));
-                surf(ax, Xc, Yc, Zc, 'FaceAlpha', 0.15, 'EdgeColor', color,'EdgeAlpha',0.3, 'LineStyle', '--', 'FaceColor', color, 'DisplayName', sprintf('%3.2f%% confidence interval',h*100));
+                surf(ax, real(Xc), real(Yc), real(Zc), 'FaceAlpha', 0.15, 'EdgeColor', color,'EdgeAlpha',0.3, 'LineStyle', '--', 'FaceColor', color, 'DisplayName', sprintf('%3.2f%% confidence interval',h*100));
             else
                 error('plot_distribution only supports 2D or 3D for extent.');
             end
