@@ -53,9 +53,16 @@ classdef Integrator_3D_euler < BREW.dynamics.DynamicsBase
             G(7:9,4:6) = dt*T;      % Euler angles
             G(10:12,4:6) = eye(3);  % angular rates
         end
-        function new_extent = propagate_extent(obj, dt, state, extent)
+        function new_extent = propagate_extent(obj, state, extent, varargin)
             % Propagate the extent by rotating it according to the angular rates (p, q, r) over dt
             % state: [x, y, z, vx, vy, vz, phi, theta, psi, p, q, r]
+            p = inputParser;
+            p.CaseSensitive = true;
+            addParameter(p, 'dt', []); 
+            parse(p, varargin{:});
+
+            dt = p.Results.dt;
+            
             dphi = state(10) * dt;
             dtheta = state(11) * dt;
             dpsi = state(12) * dt;

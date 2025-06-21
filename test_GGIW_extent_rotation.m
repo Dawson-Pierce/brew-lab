@@ -37,7 +37,7 @@ axis(ax, [-5 5 -5 5 -5 5]);
 for k = 1:num_steps
     cla(ax);
     % Plot the current extent
-    GGIWobj.IWshape = motion.propagate_extent(dt, GGIWobj.mean,  GGIWobj.IWshape);
+    GGIWobj.IWshape = motion.propagate_extent(GGIWobj.mean,  GGIWobj.IWshape, 'dt', dt);
     if k == round(num_steps / 2)
         GGIWobj.mean = motion.propagateState([], dt, GGIWobj.mean, 1*[0 0 0 rand(1,3)]');
     else

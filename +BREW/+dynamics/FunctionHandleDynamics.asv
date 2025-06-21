@@ -1,6 +1,6 @@
 classdef FunctionHandleDynamics < BREW.dynamics.DynamicsBase
-    % NOTE: Assumes x dot = f(timestep, state, dt) + g(timestep, state, dt) * u
-    % NOTE: Assumes extent = M(timestep, state, dt) * prev_extent * M(timestep, state, dt)'
+    % NOTE: Assumes x dot = f(timestep, state) + g(timestep, state, dt) * u
+    % NOTE: Assumes extent = M(state) * prev_extent * M(state)'
 
     properties (Constant)
         stateNames = {'Unknown'}
@@ -37,18 +37,18 @@ classdef FunctionHandleDynamics < BREW.dynamics.DynamicsBase
         function nextState = propagateState(obj, timestep, dt, state, u)
             if ~isempty(obj.g) && ~isempty(u)
                 if isa(obj.g,'function_handle')
-                    nextState = obj.f(timestep, state, dt) + obj.g(timestep, state, dt) * u;
+                    nextState = obj.f(timestep, state) + obj.g(timestep, state) * u;
                 else
-                    nextState = obj.f(timestep, state, dt) + obj.g * u;
+                    nextState = obj.f(timestep, state) + obj.g * u;
                 end
             else
-                nextState = obj.f(timestep, state, dt);
+                nextState = obj.f(timestep, state);
             end
         end
 
         function stateMat = getStateMat(obj, timestep, dt, state, varargin)
             if isa(obj.F,'function_handle')
-                stateMat = obj.F(timestep, state, dt);
+                stateMat = obj.F(timestep, state);
             else
                 stateMat = obj.F;
             end
@@ -56,15 +56,15 @@ classdef FunctionHandleDynamics < BREW.dynamics.DynamicsBase
         
         function inputMat = getInputMat(obj, timestep, dt, state, varargin) 
             if isa(obj.G,'function_handle')
-                inputMat = obj.G(timestep, state, dt);
+                inputMat = obj.G(timestep, state);
             else
                 inputMat = obj.G;
             end
         end
 
-        function new_extent = propagate_extent(obj, dt, state, extent)
+        function new_extent = propagate_extent(obj, state, extent, varargin)
             if isa(obj.M,'function_handle')
-                new_extent = obj.M(timestep, state, dt) * extent * obj.M(timestep, state, dt)';
+                new_extent = obj.M(state) * extent * obj.M(state)';
             elseif isempty(obj.M)
                 new_extent = extent;
             else

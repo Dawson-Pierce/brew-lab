@@ -6,9 +6,9 @@ clear; close all; clc;
 alpha = 100;
 beta = 1;
 meanVal = [0; 0; 0; 0; 0; 0];
-covVal = 0.1 * eye(length(meanVal));
-IWdof = 10;
-IWshape = [4 1 0.5; 1 4 0.3; 0.5 0.3 0.2];
+covVal = 0.5 * eye(length(meanVal));
+IWdof = 100;
+IWshape = [100 1 0.5; 1 100 0.3; 0.5 0.3 5];
 GGIW_truth = BREW.distributions.GGIW(alpha, beta, meanVal, covVal, IWdof, IWshape);
 
 % --- Motion Model ---
@@ -18,7 +18,7 @@ motion = BREW.dynamics.common.Integrator_3D();
 
 % --- Measurement Model ---
 H = [eye(3), zeros(3, length(meanVal)-3)]; % Extract x, y, z
-R = 0.05 * eye(3); % Measurement noise
+R = 0.2 * eye(3); % Measurement noise
 
 % --- EKF Initialization ---
 process_noise = 0.01 * eye(length(meanVal));
@@ -36,7 +36,6 @@ hold(ax, 'on');
 xlabel('X'); ylabel('Y'); zlabel('Z');
 title('EKF Tracking GGIW Truth Model');
 view(3);
-axis(ax, [-5 5 -5 5 -5 5]);
 
 % --- Initial Plots ---
 GGIW_truth.plot_distribution(ax, 1:3, 0.95, 'w');
@@ -48,7 +47,7 @@ GGIW_est = GGIW_init;
 for k = 1:num_steps
     cla(ax);
     % --- Propagate Truth ---
-    GGIW_truth.IWshape = motion.propagate_extent(dt, GGIW_truth.mean, GGIW_truth.IWshape);
+    GGIW_truth.IWshape = motion.propagate_extent(GGIW_truth.mean, GGIW_truth.IWshape);
     if k == round(num_steps / 2)
         GGIW_truth.mean = motion.propagateState([], dt, GGIW_truth.mean, rand(3,1));
     else
@@ -59,9 +58,12 @@ for k = 1:num_steps
     meas = GGIW_truth.sample_measurements([1 2 3]);
     
     % --- EKF Predict ---
-    GGIW_pred = EKF.predict([], dt, GGIW_est, []);
+    GGIW_pred = EKF.predict([], dt, GGIW_est, [],'tau',1); 
+
     % --- EKF Correct ---
-    GGIW_est = EKF.correct(dt, meas, GGIW_pred);
+    [GGIW_est, lik] = EKF.correct(dt, meas, GGIW_pred); 
+
+    disp(lik)
     
     % --- Plot Truth Extent ---
     % GGIW_truth.plot_distribution(ax, 1:3, 0.95, 'w');
@@ -75,8 +77,12 @@ for k = 1:num_steps
     plot3(ax, GGIW_truth.mean(1), GGIW_truth.mean(2), GGIW_truth.mean(3), 'wo', 'MarkerFaceColor', 'w');
     xlabel('X'); ylabel('Y'); zlabel('Z');
     title(sprintf('EKF Tracking GGIW Truth (Step %d/%d)', k, num_steps));
+
+    ax_extender = 20;
     
-    axis(ax, [GGIW_truth.mean(1)-5  GGIW_truth.mean(1)+5 GGIW_truth.mean(2)-5  GGIW_truth.mean(2)+5 GGIW_truth.mean(3)-5  GGIW_truth.mean(3)+5]);
+    axis(ax, [GGIW_truth.mean(1)-ax_extender  GGIW_truth.mean(1)+ax_extender ...
+        GGIW_truth.mean(2)-ax_extender  GGIW_truth.mean(2)+ax_extender ...
+        GGIW_truth.mean(3)-ax_extender  GGIW_truth.mean(3)+ax_extender]);
 
     drawnow;
 
