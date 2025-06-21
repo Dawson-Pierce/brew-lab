@@ -41,9 +41,9 @@ classdef ExtendedKalmanFilter < BREW.filters.FiltersBase
                 nextAlpha = prevAlpha / p.Results.forgetting_factor; 
                 nextBeta = prevBeta / p.Results.forgetting_factor;
                 nextIWdof = 2*prevDist.d + 2 + exp(-dt / p.Results.tau) * (prevIWdof - 2*prevDist.d - 2); 
-                nextIWshape = (nextIWdof - 2*prevDist.d - 2)/...
-                    (prevIWdof - 2*prevDist.d - 2) * ...
-                    obj.dyn_obj_.propagate_extent(dt, prevState, prevIWshape); % this last function computes M*V*M'
+                nextIWshape = (nextIWdof - 2*prevDist.d - 2) * ...
+                    (prevIWdof - 2*prevDist.d - 2)^-1 * ...
+                    obj.dyn_obj_.propagate_extent(prevState, prevIWshape); % this last function computes M*V*M'
 
                 % Create the next distribution for GGIW
                 nextDist = BREW.distributions.GGIW(nextAlpha, nextBeta, nextState, nextCov, nextIWdof, nextIWshape);
@@ -63,7 +63,7 @@ classdef ExtendedKalmanFilter < BREW.filters.FiltersBase
                 H = obj.getMeasurementMatrix(prevState);
 
                 S = H * prevCov * H' + obj.measurement_noise;
-                S = 0.5 * (S+S');
+                S = 0.5 * (S + S');
 
                 K = prevCov * H' * inv(S);
 
@@ -101,7 +101,7 @@ classdef ExtendedKalmanFilter < BREW.filters.FiltersBase
 
                 H = obj.getMeasurementMatrix(prevState);
 
-                S = H * prevCov * H' + X_hat / W;
+                S = H * prevCov * H' + X_hat / W + obj.measurement_noise;
 
                 K = prevCov * H' * S^-1;
 
@@ -114,25 +114,29 @@ classdef ExtendedKalmanFilter < BREW.filters.FiltersBase
                 nextIWdof = prevIWdof + W;
                 nextIWshape = prevIWshape + N_hat + scatter_meas;
 
-                nextDist = BREW.distributions.GGIW(nextAlpha,nextBeta,nextState,nextCov,nextIWdof,nextIWshape);
+                nextDist = BREW.distributions.GGIW(nextAlpha,nextBeta,nextState,nextCov,nextIWdof,nextIWshape); 
+                
+                v0 = prevIWdof;   V0 = prevIWshape;
+                v1 = nextIWdof;   V1 = nextIWshape;
+                a0 = prevAlpha;   b0 = prevBeta;
+                a1 = nextAlpha;   b1 = nextBeta;
+                
+                log_likelihood = ...
+                    (v0 - d - 1)/2 * log(det(V0)) ...
+                  - (v1 - d - 1)/2 * log(det(V1)) ...
+                  + sum(gammaln((v1 - d - 1)/2 + (1 - (1:d))/2)) ...
+                  - sum(gammaln((v0 - d - 1)/2 + (1 - (1:d))/2)) ...
+                  + 0.5 * log(det(X_hat)) ...
+                  - 0.5 * log(det(S)) ...
+                  + gammaln(a1) - gammaln(a0) ...
+                  + a0 * log(b0) - a1 * log(b1) ...
+                  - (W * log(pi) + log(W)) * d / 2;
+                
+                likelihood = exp(log_likelihood);
 
-                % log_card = gammaln(prevAlpha + W) ... 
-                %          - gammaln(prevAlpha) ... 
-                %          - gammaln(W + 1) ... 
-                %          + prevAlpha*(log(prevBeta) - log(prevBeta + 1)) ... 
-                %          - W*log(prevBeta + 1);
-                % 
-                % residual   = scatter_meas + W*(epsilon*epsilon');
-                % log_spatial = -(W*d/2)*log(2*pi) ... 
-                %             - (W/2)*log(det(S)) ... 
-                %             - 0.5*trace(S\residual); 
-                % 
-                % log_lihood = log_card + log_spatial;
-
-                likelihood = 1;
             end
         
         end
-    end
+    end 
 
 end

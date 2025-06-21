@@ -76,17 +76,42 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
             end
         end
         
-        function s = sample(obj, numSamples)
-            % Draw samples from the mixture model (returns cell array of measurements)
-            if nargin < 2, numSamples = 1; end
-            w = obj.weights(:) / sum(obj.weights);
-            idx = randsample(1:numel(obj.distributions), numSamples, true, w);
-            s = cell(numSamples,1);
-            for i = 1:numSamples
-                s{i} = obj.distributions{idx(i)}.sample_measurements();
+        function measurements = sample_measurements(obj, xy_inds, random_extent)
+            % SAMPLE_MEASUREMENTS  draw from each GGIW in the mixture and concatenate
+            %
+            %   meas = obj.sample_measurements(xy_inds,random_extent)
+            %     returns an N_total×d array of measurements
+            %     (each row is one [x y (z)] vector).
+            %
+            %   Default xy_inds = [1 2] for d=2, [1 2 3] for d=3.
+            %   Default random_extent = false.
+            
+            %--- handle defaults (inspect first component for dimensionality) ---
+            if nargin < 2 || isempty(xy_inds)
+                d = obj.distributions{1}.d;
+                if d==2
+                    xy_inds = [1 2];
+                elseif d==3
+                    xy_inds = [1 2 3];
+                else
+                    error('Invalid dimension for IW shape.');
+                end
             end
-        end
+            if nargin < 3 || isempty(random_extent)
+                random_extent = false;
+            end
         
+            %--- draw & concatenate ---
+            all_meas = [];         % will be d × N_total
+            for i = 1:numel(obj.distributions)
+                mi = obj.distributions{i}.sample_measurements(xy_inds, random_extent);
+                all_meas = [all_meas, mi];   %#ok<AGROW>
+            end
+        
+            %--- return as an N_total-by-d list of [x y (z)] rows ---
+            measurements = all_meas.';  
+        end
+
         function disp(obj)
             % Display method for the GGIW Mixture
             for i = 1:numel(obj.distributions)
@@ -95,16 +120,31 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
             end
         end
         
-        function plot_distributions(obj, ax, plt_inds, h, color)
-            % Plot all GGIW components in 2D
-            if nargin < 2 || isempty(ax), ax = gca; end
-            if nargin < 3 || isempty(plt_inds), plt_inds = [1 2]; end
-            if nargin < 4, h = 0.95; end
-            if nargin < 5, color = 'r'; end
-            for i = 1:numel(obj.distributions)
-                obj.distributions{i}.plot_distribution(ax, plt_inds, h, color);
+        function plot_distributions(obj, ax, plt_inds, h, colors)
+            % Plot all GGIW components in 2D (or 3D if plt_inds has 3 elements)
+            if nargin < 2 || isempty(ax),        ax = gca;       end
+            if nargin < 3 || isempty(plt_inds),   plt_inds = [1 2]; end
+            if nargin < 4 || isempty(h),          h = 0.95;      end
+        
+            n = numel(obj.distributions);
+        
+            % if no colors given, pull an n‐by‐3 list from lines
+            if nargin < 5 || isempty(colors)
+                colors = lines(n);
+            end
+        
+            % if user passed a single color (char or 1×3), replicate it
+            if (ischar(colors) && size(colors,1)==1) || (isnumeric(colors) && isequal(size(colors),[1,3]))
+                colors = repmat(colors, n, 1);
+            end
+        
+            for i = 1:n
+                % pick the i-th row of colors as an RGB triplet
+                c = colors(i,:);
+                obj.distributions{i}.plot_distribution(ax, plt_inds, h, c);
             end
         end
+
         
         function addComponents(obj, new_alphas, new_betas, new_means, new_covariances, new_IWdofs, new_IWshapes, new_weights)
             % Add new GGIW components to the mixture
