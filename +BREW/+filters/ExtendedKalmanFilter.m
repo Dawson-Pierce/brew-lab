@@ -4,24 +4,43 @@ classdef ExtendedKalmanFilter < BREW.filters.FiltersBase
     % most of the stuff for dynamics model and measurement model is 
     % inherited, just update the predict and correct methodologies 
 
+    % dynamics model also has capability to be an input into the filter so
+    % we can change it mid tracking application
+
     methods  
-        function nextDist = predict(obj, timestep, dt, prevDist, u, varargin)
+        function nextDist = predict(obj, timestep, dt, prevDist, varargin)
             p = inputParser; 
             p.CaseSensitive = true;
             addParameter(p, 'forgetting_factor', 1);
             addParameter(p, 'tau', 1);
+            addParameter(p,'u',0);
+            addParameter(p,'dyn_obj',[]); % adds capability to change dynamics model
+            addParameter(p,'process_noise',[]); 
 
             % Parse known arguments
             parse(p, varargin{:});
+
+            u = p.Results.u;
+
+            dyn_obj = p.Results.dyn_obj;
+            proc_noise = p.Results.process_noise;
 
             if isa(prevDist,'BREW.distributions.Gaussian')
                 prevState = prevDist.mean;
                 prevCov = prevDist.covariance; 
 
-                nextState = obj.dyn_obj_.propagateState(timestep, dt, prevState, u);
-
-                F =  obj.dyn_obj_.getStateMat(timestep, dt, prevState);
-                nextCov = F * prevCov * F' + obj.process_noise;
+                if ~isempty(dyn_obj)
+                    nextState = dyn_obj.propagateState(timestep, dt, prevState, u);
+                    F =  dyn_obj.getStateMat(timestep, dt, prevState);
+                elseif ~isempty(obj.dyn_obj_)
+                    nextState = obj.dyn_obj_.propagateState(timestep, dt, prevState, u);
+                    F =  obj.dyn_obj_.getStateMat(timestep, dt, prevState);
+                end
+                if ~isempty(proc_noise)
+                    nextCov = F * prevCov * F' + proc_noise;
+                else
+                    nextCov = F * prevCov * F' + obj.process_noise;
+                end
 
                 nextDist = BREW.distributions.Gaussian(nextState,nextCov);
 
@@ -33,10 +52,18 @@ classdef ExtendedKalmanFilter < BREW.filters.FiltersBase
                 prevIWdof = prevDist.IWdof;
                 prevIWshape = prevDist.IWshape; 
 
-                nextState = obj.dyn_obj_.propagateState(timestep, dt, prevState, u);
-
-                F =  obj.dyn_obj_.getStateMat(timestep, dt, prevState);
-                nextCov = F * prevCov * F' + obj.process_noise;
+                if ~isempty(dyn_obj)
+                    nextState = dyn_obj.propagateState(timestep, dt, prevState, u);
+                    F =  dyn_obj.getStateMat(timestep, dt, prevState);
+                elseif ~isempty(obj.dyn_obj_)
+                    nextState = obj.dyn_obj_.propagateState(timestep, dt, prevState, u);
+                    F =  obj.dyn_obj_.getStateMat(timestep, dt, prevState);
+                end
+                if ~isempty(proc_noise)
+                    nextCov = F * prevCov * F' + proc_noise;
+                else
+                    nextCov = F * prevCov * F' + obj.process_noise;
+                end
 
                 nextAlpha = prevAlpha / p.Results.forgetting_factor; 
                 nextBeta = prevBeta / p.Results.forgetting_factor;
@@ -50,22 +77,52 @@ classdef ExtendedKalmanFilter < BREW.filters.FiltersBase
             end
         
         end
-        function [nextDist, likelihood] = correct(obj, dt, meas, prevDist) 
+        function [nextDist, likelihood] = correct(obj, dt, meas, prevDist, varargin) 
+
+            p = inputParser; 
+            p.CaseSensitive = true;
+            addParameter(p,'H',[]); % could be constant, could be function handle ie H = @(x) ...
+            addParameter(p,'h',[]); % expected to be function handle ie h = @(x) ...
+            addParameter(p,'meas_noise',[]); 
+
+            % Parse known arguments
+            parse(p, varargin{:});
+
+            h_input = p.Results.h;
+            H_input = p.Results.H;
+            meas_noise = p.Results.meas_noise;
 
             if isa(prevDist,'BREW.distributions.Gaussian')
                 prevState = prevDist.mean;
                 prevCov = prevDist.covariance;
 
-                est_meas = obj.estimate_measurement(prevState); % Defined in base class
+                if ~isempty(h_input)
+                    est_meas = h_input(prevState);
+                else
+                    est_meas = obj.estimate_measurement(prevState); 
+                end
 
                 epsilon = meas - est_meas;
 
-                H = obj.getMeasurementMatrix(prevState);
+                if ~isempty(H_input)
+                    if isa(H_input,'function_handle')
+                        H = H_input(prevState);
+                    else
+                        H = H_input;
+                    end
+                else
+                    H = obj.getMeasurementMatrix(prevState);
+                end
+                
+                if ~isempty(meas_noise)
+                    S = H * prevCov * H' + meas_noise;
+                else
+                    S = H * prevCov * H' + obj.measurement_noise;
+                end
 
-                S = H * prevCov * H' + obj.measurement_noise;
                 S = 0.5 * (S + S');
 
-                K = prevCov * H' * inv(S);
+                K = prevCov * H' / S;
 
                 nextState = prevState + K * epsilon;
 
@@ -83,7 +140,21 @@ classdef ExtendedKalmanFilter < BREW.filters.FiltersBase
                 prevIWshape = prevDist.IWshape; 
                 d = prevDist.d;
 
-                est_meas = obj.estimate_measurement(prevState); % Defined in base class
+                if ~isempty(h_input)
+                    est_meas = h_input(prevState);
+                else
+                    est_meas = obj.estimate_measurement(prevState); 
+                end 
+
+                if ~isempty(H_input)
+                    if isa(H_input,'function_handle')
+                        H = H_input(prevState);
+                    else
+                        H = H_input;
+                    end
+                else
+                    H = obj.getMeasurementMatrix(prevState);
+                end
 
                 W = size(meas,2);
 
@@ -99,9 +170,11 @@ classdef ExtendedKalmanFilter < BREW.filters.FiltersBase
 
                 N = epsilon * epsilon';
 
-                H = obj.getMeasurementMatrix(prevState);
-
-                S = H * prevCov * H' + X_hat / W + obj.measurement_noise;
+                if ~isempty(meas_noise)
+                    S = H * prevCov * H' + X_hat / W + meas_noise;
+                else
+                    S = H * prevCov * H' + X_hat / W + obj.measurement_noise;
+                end
 
                 K = prevCov * H' * S^-1;
 
