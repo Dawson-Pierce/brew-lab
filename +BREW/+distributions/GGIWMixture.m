@@ -7,30 +7,66 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
         means
         covariances
         IWdofs
-        IWshapes
+        IWshapes 
+    end 
+
+    properties 
+        isExtendedTarget = 1;
     end
-    
+
     methods
-        function obj = GGIWMixture(alphas, betas, means, covariances, IWdofs, IWshapes, weights)
-            % Initialize a GGIWMixture object
-            if nargin < 1, alphas = {}; end
-            if nargin < 2, betas = {}; end
-            if nargin < 3, means = {}; end
-            if nargin < 4, covariances = {}; end
-            if nargin < 5, IWdofs = {}; end
-            if nargin < 6, IWshapes = {}; end
-            if nargin < 7, weights = []; end
+        function obj = GGIWMixture(varargin)
+            p = inputParser; 
+            p.CaseSensitive = true;
+            addParameter(p, 'dist_list', {});
+            addParameter(p, 'alphas', {});
+            addParameter(p, 'betas', {});
+            addParameter(p, 'means', {});
+            addParameter(p, 'covariances', {});
+            addParameter(p, 'IWdofs', {});
+            addParameter(p, 'IWshapes', {});
+            addParameter(p, 'weights', []);
+        
+            parse(p, varargin{:});
+        
             dists = {};
-            for i = 1:numel(alphas)
-                dists{end+1} = BREW.distributions.GGIW(alphas{i}, betas{i}, means{i}, covariances{i}, IWdofs{i}, IWshapes{i});
+        
+            % Option 1: Use given GGIW objects
+            if ~isempty(p.Results.dist_list)
+                dists = p.Results.dist_list;
             end
-            obj@BREW.distributions.BaseMixtureModel(dists, weights);
+        
+            % Option 2: Construct GGIW objects from components
+            if ~isempty(p.Results.alphas) && ...
+               ~isempty(p.Results.betas) && ...
+               ~isempty(p.Results.means) && ...
+               ~isempty(p.Results.covariances) && ...
+               ~isempty(p.Results.IWdofs) && ...
+               ~isempty(p.Results.IWshapes)
+           
+                N = numel(p.Results.alphas);  % Assume all parameter lists are the same length
+                for i = 1:N
+                    dists{end+1} = BREW.distributions.GGIW( ...
+                        p.Results.alphas{i}, ...
+                        p.Results.betas{i}, ...
+                        p.Results.means{i}, ...
+                        p.Results.covariances{i}, ...
+                        p.Results.IWdofs{i}, ...
+                        p.Results.IWshapes{i});
+                end
+            end
+        
+            obj@BREW.distributions.BaseMixtureModel(dists, p.Results.weights);
         end
         
+        function val = get.isExtendedTarget(obj)
+            val = 1;
+        end
+
         function val = get.alphas(obj)
             val = cellfun(@(d) d.alpha, obj.distributions, 'UniformOutput', false);
         end
-        function set.alphas(obj, val)
+        function obj = set.alphas(obj, val)
             for i = 1:numel(obj.distributions)
                 obj.distributions{i}.alpha = val{i};
             end
@@ -38,7 +74,7 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
         function val = get.betas(obj)
             val = cellfun(@(d) d.beta, obj.distributions, 'UniformOutput', false);
         end
-        function set.betas(obj, val)
+        function obj = set.betas(obj, val)
             for i = 1:numel(obj.distributions)
                 obj.distributions{i}.beta = val{i};
             end
@@ -46,7 +82,7 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
         function val = get.means(obj)
             val = cellfun(@(d) d.mean, obj.distributions, 'UniformOutput', false);
         end
-        function set.means(obj, val)
+        function obj = set.means(obj, val)
             for i = 1:numel(obj.distributions)
                 obj.distributions{i}.mean = val{i};
             end
@@ -54,7 +90,7 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
         function val = get.covariances(obj)
             val = cellfun(@(d) d.covariance, obj.distributions, 'UniformOutput', false);
         end
-        function set.covariances(obj, val)
+        function obj = set.covariances(obj, val)
             for i = 1:numel(obj.distributions)
                 obj.distributions{i}.covariance = val{i};
             end
@@ -62,7 +98,7 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
         function val = get.IWdofs(obj)
             val = cellfun(@(d) d.IWdof, obj.distributions, 'UniformOutput', false);
         end
-        function set.IWdofs(obj, val)
+        function obj = set.IWdofs(obj, val)
             for i = 1:numel(obj.distributions)
                 obj.distributions{i}.IWdof = val{i};
             end
@@ -70,7 +106,7 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
         function val = get.IWshapes(obj)
             val = cellfun(@(d) d.IWshape, obj.distributions, 'UniformOutput', false);
         end
-        function set.IWshapes(obj, val)
+        function obj = set.IWshapes(obj, val)
             for i = 1:numel(obj.distributions)
                 obj.distributions{i}.IWshape = val{i};
             end
@@ -108,8 +144,7 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
                 all_meas = [all_meas, mi];   %#ok<AGROW>
             end
         
-            %--- return as an N_total-by-d list of [x y (z)] rows ---
-            measurements = all_meas.';  
+            measurements = all_meas;  
         end
 
         function disp(obj)
@@ -142,16 +177,6 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
                 % pick the i-th row of colors as an RGB triplet
                 c = colors(i,:);
                 obj.distributions{i}.plot_distribution(ax, plt_inds, h, c);
-            end
-        end
-
-        
-        function addComponents(obj, new_alphas, new_betas, new_means, new_covariances, new_IWdofs, new_IWshapes, new_weights)
-            % Add new GGIW components to the mixture
-            % Each argument is a cell array (except new_weights, which is numeric)
-            for i = 1:numel(new_alphas)
-                obj.distributions{end+1} = BREW.distributions.GGIW(new_alphas{i}, new_betas{i}, new_means{i}, new_covariances{i}, new_IWdofs{i}, new_IWshapes{i});
-                obj.weights(end+1) = new_weights(i);
             end
         end
     end

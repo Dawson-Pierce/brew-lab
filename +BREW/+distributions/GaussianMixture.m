@@ -5,16 +5,33 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
         means       % Cell array of means for each component
         covariances % Cell array of covariances for each component
     end
+
+    properties 
+        isExtendedTarget = 0;
+    end
     
     methods
-        function obj = GaussianMixture(means, covariances, weights)
-            % Initialize a GaussianMixture object
-            if nargin < 1, means = {}; end
-            if nargin < 2, covariances = {}; end
-            if nargin < 3, weights = []; end
+        function obj = GaussianMixture(varargin)
+            p = inputParser; 
+            p.CaseSensitive = true;
+            addParameter(p, 'dist_list', {});
+            addParameter(p, 'means', {});
+            addParameter(p, 'covariances', {});
+            addParameter(p,'weights',[]);
+
+            % Parse known arguments
+            parse(p, varargin{:});
+
             dists = {};
-            for i = 1:numel(means)
-                dists{end+1} = BREW.distributions.Gaussian(means{i}, covariances{i});
+
+            if ~isempty(p.Results.dist_list)
+                dists = p.Results.dist_list;
+            end
+
+            if ~isempty(p.Results.means) && ~isempty(p.Results.covariances) 
+                for i = 1:numel(p.Results.means)
+                    dists{end+1} = BREW.distributions.Gaussian(p.Results.means{i}, p.Results.covariances{i});
+                end 
             end
             obj@BREW.distributions.BaseMixtureModel(dists, weights);
         end
@@ -76,15 +93,5 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
             end
         end
         
-        function addComponents(obj, new_means, new_covariances, new_weights)
-            % Add new Gaussian components to the mixture
-            % new_means: cell array of means
-            % new_covariances: cell array of covariances
-            % new_weights: numeric array of weights
-            for i = 1:numel(new_means)
-                obj.distributions{end+1} = BREW.distributions.Gaussian(new_means{i}, new_covariances{i});
-                obj.weights(end+1) = new_weights(i);
-            end
-        end
     end
 end 

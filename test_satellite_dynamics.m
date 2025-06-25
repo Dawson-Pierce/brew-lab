@@ -1,4 +1,4 @@
-clear; clc; close all
+clear; clc; close all 
 
 % --- Constants ---
 mu = 3.986004418e14; % Earth's gravitational parameter, m^3/s^2
@@ -11,14 +11,14 @@ v0 = sqrt(mu/r0);    % Circular orbit velocity, m/s
 % Allows for arbitrary angle in xy-plane
 state0 = [r0; 0; 0; 0; v0; 0]; % [x; y; z; vx; vy; vz]
 
-% --- Define high-fidelity continuous dynamics ---
+% --- Define continuous dynamics ---
 f = @(t, x) [x(4:6); -mu/norm(x(1:3))^3 * x(1:3)];
 
 custom_dyn = BREW.dynamics.ContinuousDynamics('f', f);
 
 % --- Simulation Parameters ---
 dt = 1;               % timestep in seconds
-num_steps = 350;     % number of steps (~1 orbital period for LEO)
+num_steps = 400;     % number of steps (~1 orbital period for LEO)
 states = zeros(6, num_steps);
 states(:,1) = state0;
 
@@ -27,7 +27,9 @@ for k = 2:num_steps
     states(:,k) = custom_dyn.propagateState(k, dt, states(:,k-1));
 end
 
-x = states(1,:); y = states(2,:); z = states(3,:);
+x = states(1,:); 
+y = states(2,:); 
+z = states(3,:);
 
 % --- Convert ECI to Geodetic Coordinates (treat ECI ~ ECEF for short duration) ---
 lla = ecef2lla([x', y', z']);
@@ -38,26 +40,42 @@ f = uifigure;
 g = geoglobe(f);
 % geoplot3(g, lat, lon, alt, 'r', 'HeightReference', 'ellipsoid', 'LineStyle','none','Marker','o', 'LineWidth', 2); 
 
-alphas = {50,50};
+target_motion = BREW.dynamics.common.Integrator_3D();
+
+alphas = {10,10};
 betas = {1,1}; 
-means = {[0; 10; 500],[0; 20; 500]}; 
+means = {[0; 10; 1000; 0; 0.1; 0],[0; 20; 1000; 0; 0.05; 0]}; % in lla, so it's trippy. Arbitrarily set. 
 covariances = {eye(3), eye(3)}; 
-IWdofs = {10, 10}; 
-IWshapes = {[2 0.1 0.1; 0.1 2 0.1; 0.1 0.1 0.1],[4 1 0.5; 1 4 0.3; 0.5 0.3 0.1]}; 
+IWdofs = {1500, 1500}; 
+IWshapes = {[0.1 0 0; 0 0.5 0; 0 0 0.1],[0.1 0 0; 0 0.5 0; 0 0 0.1]}; 
 weights = [1,1];
 
-mix = BREW.distributions.GGIWMixture(alphas,betas,means,covariances,IWdofs,IWshapes,weights);
+mix = BREW.distributions.GGIWMixture( ...
+    'alphas', alphas, ...
+    'betas', betas, ...
+    'means', means, ...
+    'covariances', covariances, ...
+    'IWdofs', IWdofs, ...
+    'IWshapes', IWshapes, ...
+    'weights', weights);
 
 meas_points = geoplot3(g,0,0,0,'r','Marker','o','LineStyle','none');
 
+gifFilename = 'SatelliteDetections.gif';
+
 % --- Animate camera following the satellite ---
-for k = 1:10:num_steps
+for k = 1:5:num_steps
 
     new_points = mix.sample_measurements();
 
-    meas_points.LatitudeData = new_points(:,1);
-    meas_points.LongitudeData = new_points(:,2);
-    meas_points.HeightData = new_points(:,3);
+    for kk = 1:length(mix.distributions)
+        mean_temp = mix.means{kk};
+        mix.means{kk} = target_motion.propagateState([],dt,mean_temp);
+    end
+
+    meas_points.LatitudeData = new_points(1,:);
+    meas_points.LongitudeData = new_points(2,:);
+    meas_points.HeightData = new_points(3,:);
 
     % Camera position at current satellite position
     campos(g, lat(k), lon(k), alt(k));  
@@ -91,5 +109,23 @@ for k = 1:10:num_steps
 
     drawnow;
 
-    pause(0.2)
+    % % capture the frame as an RGB image
+    % frame = getframe(f);
+    % img   = frame2im(frame);
+    % 
+    % % convert to an indexed image with a fixed 256‐color map
+    % [A, map] = rgb2ind(img, 256);
+    % 
+    % % write to GIF: first frame creates the file, subsequent frames append
+    % if k == 1
+    %     imwrite(A, map, gifFilename, 'gif', ...
+    %             'LoopCount', Inf, ...      % make it loop forever
+    %             'DelayTime', 0.1);         % seconds between frames
+    % else
+    %     imwrite(A, map, gifFilename, 'gif', ...
+    %             'WriteMode', 'append', ...
+    %             'DelayTime', 0.1);
+    % end
+    % 
+    % pause(0.05);
 end

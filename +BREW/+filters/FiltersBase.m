@@ -22,9 +22,12 @@ classdef (Abstract) FiltersBase < handle
             addParameter(p, 'g', []); % function handle for input 
             addParameter(p, 'M', []); % function/matrix for extent rotation
 
-            addParameter(p, 'h', []); % function handle for extent dynamics
-            addParameter(p, 'H', []); % function handle for extent rotation
+            addParameter(p, 'h', []); % function handle for measurement function
+            addParameter(p, 'H', []); % function handle for measurement matrix
 
+            addParameter(p, 'process_noise', []); 
+            addParameter(p, 'measurement_noise', []);
+            
             % Parse known arguments
             parse(p, varargin{:});
 
@@ -32,6 +35,10 @@ classdef (Abstract) FiltersBase < handle
                 'G',p.Results.G,'f',p.Results.f,'g',p.Results.g,'M',p.Results.M) 
 
             obj.setMeasurementModel('h',p.Results.h,'H',p.Results.H) 
+
+            obj.process_noise = p.Results.process_noise;
+            obj.measurement_noise = p.Results.measurement_noise;
+            
         end 
 
         function setProcessNoise(obj,Q)
@@ -104,8 +111,8 @@ classdef (Abstract) FiltersBase < handle
     end
 
     methods (Abstract)
-        nextDist = predict(obj, timestep, dt, prevDist, u)
-        [nextDist, likelihood] = correct(obj, dt, meas, prevDist)
+        nextDist = predict(obj, timestep, dt, prevDist, varargin)
+        [nextDist, likelihood] = correct(obj, dt, meas, prevDist,varargin)
     end
 
 end

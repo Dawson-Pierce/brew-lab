@@ -1,11 +1,11 @@
-classdef BaseMixtureModel < handle
+classdef BaseMixtureModel 
     % Generic base class for mixture distribution models.
     % Defines required functions and base attributes for the mixture model.
     
     properties
         distributions = {}  % Cell array of BaseSingleModel objects
         weights = []        % Array of weights
-        monteCarloSize = 1e4;
+        monteCarloSize = 1e4; 
     end
     
     methods
@@ -19,8 +19,8 @@ classdef BaseMixtureModel < handle
             if nargin > 2
                 obj.monteCarloSize = monteCarloSize;
             end
-        end
-        
+        end 
+
         function s = sample(obj, varargin)
             % Draw a sample from the mixture model (to be implemented by child class)
             warning('sample not implemented by class %s', class(obj));
@@ -33,24 +33,47 @@ classdef BaseMixtureModel < handle
             p = NaN;
         end
         
-        function addComponents(obj, varargin)
-            % Add component distributions to the mixture (to be implemented by child class)
-            warning('addComponents not implemented by class %s', class(obj));
+        function obj = removeComponents(obj, indices)
+            % Remove component distributions from the mixture by index 
+            if isempty(indices)
+                return;
+            end
+        
+            % Ensure indices are within bounds
+            numComponents = numel(obj.distributions);
+            if any(indices < 1) || any(indices > numComponents)
+                error('removeComponents:IndexOutOfBounds', ...
+                      'One or more indices are out of range.');
+            end
+        
+            % Convert to logical mask of components to keep
+            mask = true(1, numComponents);
+            mask(indices) = false;
+        
+            % Apply mask
+            obj.distributions = obj.distributions(mask);
+            obj.weights = obj.weights(mask);
         end
         
-        function removeComponents(obj, indices)
-            % Remove component distributions from the mixture by index
-            if ~iscell(indices)
-                indices = num2cell(indices);
-            end
-            for i = sort([indices{:}], 'descend')
-                obj.distributions(i) = [];
-                obj.weights(i) = [];
-            end
-        end
-        
-        function n = numComponents(obj)
+        function n = length(obj)
             n = numel(obj.distributions);
+        end
+
+        function new_mix = extract_mix(obj,threshold) 
+            new_mix = obj;
+            idx = obj.weights >= threshold; 
+
+            new_mix.distributions = obj.distributions(idx);
+            new_mix.weights = obj.weights(idx);
+        end
+
+        function obj = addComponents(obj, mix)
+            % Add new components to the mixture
+            % Each argument is a cell array (except new_weights, which is numeric)
+            for i = 1:length(mix)
+                obj.distributions{end+1} = mix.distributions{i};
+                obj.weights(end+1) = mix.weights(i);
+            end
         end
     end
 end 

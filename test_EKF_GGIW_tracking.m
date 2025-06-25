@@ -58,7 +58,7 @@ for k = 1:num_steps
     meas = GGIW_truth.sample_measurements([1 2 3]);
     
     % --- EKF Predict ---
-    GGIW_pred = EKF.predict([], dt, GGIW_est, [],'tau',1); 
+    GGIW_pred = EKF.predict([], dt, GGIW_est, 'tau',1); 
 
     % --- EKF Correct ---
     [GGIW_est, lik] = EKF.correct(dt, meas, GGIW_pred); 

@@ -34,39 +34,39 @@ classdef GGIW < BREW.distributions.BaseSingleModel
         function m = get.alpha(obj)
             m = obj.alpha;
         end
-        function set.alpha(obj, val)
+        function obj = set.alpha(obj, val)
             obj.alpha = val;
         end
         function c = get.beta(obj)
             c = obj.beta;
         end
-        function set.beta(obj, val)
+        function obj = set.beta(obj, val)
             obj.beta = val;
         end
         
         function m = get.mean(obj)
             m = obj.mean;
         end
-        function set.mean(obj, val)
+        function obj = set.mean(obj, val)
             obj.mean = val;
         end
         function c = get.covariance(obj)
             c = obj.covariance;
         end
-        function set.covariance(obj, val)
+        function obj = set.covariance(obj, val)
             obj.covariance = val;
         end
 
         function m = get.IWdof(obj)
             m = obj.IWdof;
         end
-        function set.IWdof(obj, val)
+        function obj = set.IWdof(obj, val)
             obj.IWdof = val;
         end
         function c = get.IWshape(obj)
             c = obj.IWshape;
         end
-        function set.IWshape(obj, val)
+        function obj = set.IWshape(obj, val)
             obj.IWshape = val;
         end
         
