@@ -7,4 +7,4 @@ This package holds general dynamics models, different distributions, and filters
 
 NOTE: This code is still in development and is in no way promised to perform to any specific standard. 
 
-![til](.\GGIW_PHD_3D.gif)
+![til](./GGIW_PHD_3D.gif)
