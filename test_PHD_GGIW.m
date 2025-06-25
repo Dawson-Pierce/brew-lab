@@ -2,13 +2,13 @@
 
 clear; clc; close all
 
-alphas = {50,50};
-betas = {1,1}; 
-means = {[0; 10; 10; -0.75; -0.75; 0],[0; 20; 10; 0; -1; 0]}; 
-covariances = {eye(6), eye(6)}; 
-IWdofs = {10, 10}; 
-IWshapes = {[5 0 0; 0 5 0; 0 0 2],[5 0 0; 0 5 0; 0 0 2]}; 
-weights = [1,1];
+alphas = {50,50,50};
+betas = {1,1,1}; 
+means = {[0; 10; 10; -0.75; -0.75; 0],[5; 20; 10; 0; -1; 0],[0; 12.5; 0; -0.5; 0; 1]}; 
+covariances = {eye(6), eye(6), eye(6)}; 
+IWdofs = {10, 10, 10}; 
+IWshapes = {[5 0 0; 0 5 0; 0 0 2],[5 0 0; 0 5 0; 0 0 2],[5 0 0; 0 5 0; 0 0 2]}; 
+weights = [1,1,1];
 
 truth = BREW.distributions.GGIWMixture( ...
     'alphas', alphas, ...
@@ -57,7 +57,7 @@ birth_model = BREW.distributions.GGIWMixture( ...
 
 phd = BREW.multi_target.PHD('filter',inner_filter, 'birth_model', birth_model,...
     'prob_detection', 0.8, 'prob_survive', 0.8, 'max_terms',50, ...
-    'cluster_obj',BREW.clustering.DBSCAN_obj(5,5));
+    'cluster_obj',BREW.clustering.DBSCAN_obj(3,5));
 
 f = figure; 
 ax = axes;
@@ -79,7 +79,7 @@ for k = 1:length(t)
     end
     measurements{k} = truth.sample_measurements(); % Generate measurements from the truth distribution
 
-    scatter3(measurements{k}(1,:),measurements{k}(2,:),measurements{k}(3,:),'w*','SizeData',0.2)
+    scatter3(measurements{k}(1,:),measurements{k}(2,:),measurements{k}(3,:),'w*','SizeData',0.5)
 
     % PHD stuff
     phd.predict(timestep,dt,{}); % Predict the state of the PHD filter
