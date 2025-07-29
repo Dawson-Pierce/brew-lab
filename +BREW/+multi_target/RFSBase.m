@@ -66,8 +66,7 @@ classdef (Abstract) RFSBase < handle
 
     methods (Abstract)
         predict(obj, timestep, dt, varargin)
-        correct(obj, dt, meas)
-        extracted_dist = extract(obj)
+        correct(obj, dt, meas) 
         cleanup(obj)
     end
 

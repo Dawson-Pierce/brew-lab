@@ -1,8 +1,7 @@
 classdef PHD < BREW.multi_target.RFSBase
     % Probability Hypothesis Density class
 
-    properties
-        Mix
+    properties 
         prune_threshold
         max_terms
         merge_threshold
@@ -12,7 +11,8 @@ classdef PHD < BREW.multi_target.RFSBase
         spawn_cov = []; 
         spawn_weight = [];
         enable_spawn = false;
-    end
+        Mix
+    end 
 
     methods
         function obj = PHD(varargin)
@@ -31,7 +31,7 @@ classdef PHD < BREW.multi_target.RFSBase
             addParameter(p,'prune_threshold',0.0001)
             addParameter(p,'max_terms',100)
             addParameter(p,'extract_threshold',0.5)
-            addParameter(p,'merge_threshold',4)
+            % addParameter(p,'merge_threshold',4)
             addParameter(p,'cluster_obj',[])
 
             parse(p, varargin{:});
@@ -48,7 +48,7 @@ classdef PHD < BREW.multi_target.RFSBase
             obj.prune_threshold = p.Results.prune_threshold;
             obj.max_terms = p.Results.max_terms;
             obj.extract_threshold = p.Results.extract_threshold;
-            obj.merge_threshold = p.Results.merge_threshold;
+            % obj.merge_threshold = p.Results.merge_threshold;
             obj.cluster_obj = p.Results.cluster_obj;
 
             obj.Mix = obj.birth_model;
@@ -109,7 +109,7 @@ classdef PHD < BREW.multi_target.RFSBase
             obj.prune();
             obj.cap();
             extracted_dist = obj.extract();
-        end
+        end 
     end
 
     methods (Access = protected)
@@ -118,7 +118,6 @@ classdef PHD < BREW.multi_target.RFSBase
             idx = find(obj.Mix.weights < obj.prune_threshold); 
             obj.Mix.removeComponents(idx);
         end
-
 
         function obj = cap(obj)
             if length(obj.Mix) > obj.max_terms

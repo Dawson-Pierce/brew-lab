@@ -111,7 +111,7 @@ classdef (Abstract) FiltersBase < handle
     end
 
     methods (Abstract)
-        nextDist = predict(obj, timestep, dt, prevDist, varargin)
+        nextDist = predict(obj, dt, prevDist, varargin)
         [nextDist, likelihood] = correct(obj, dt, meas, prevDist,varargin)
     end
 

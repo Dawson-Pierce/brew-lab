@@ -15,24 +15,17 @@ classdef Gaussian < BREW.distributions.BaseSingleModel
             obj.mean = meanVal;
             obj.covariance = covVal;
 
-        end
-        
-        function m = get.mean(obj)
-            m = obj.mean;
-        end
-        function set.mean(obj, val)
-            obj.mean = val;
-        end
-        function c = get.covariance(obj)
-            c = obj.covariance;
-        end
-        function set.covariance(obj, val)
-            obj.covariance = val;
-        end
+        end 
         
         function s = sample(obj, numSamples) 
             if nargin < 2, numSamples = 1; end
             s = mvnrnd(obj.mean(:)', obj.covariance, numSamples)';
+        end
+
+        function s = sample_measurements(obj,xy_indices)
+            mean_temp = obj.mean(xy_indices);
+            cov_temp = obj.covariance(xy_indices,xy_indices);
+            s = mvnrnd(mean_temp(:)', cov_temp, 1)';
         end
         
         function p = pdf(obj, x) 

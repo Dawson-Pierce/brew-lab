@@ -19,9 +19,9 @@ classdef (Abstract) DynamicsBase < handle
     end
 
     methods (Abstract)
-        nextState = propagateState(obj, timestep, dt, state, u)
-        stateMat = getStateMat(obj, timestep, dt, state, varargin)
-        inputMat = getInputMat(obj, timestep, dt, state, varargin)
+        nextState = propagateState(obj, dt, state, u)
+        stateMat = getStateMat(obj, dt, state, varargin)
+        inputMat = getInputMat(obj, dt, state, varargin)
     end
 
     methods

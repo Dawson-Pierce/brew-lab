@@ -30,10 +30,27 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
 
             if ~isempty(p.Results.means) && ~isempty(p.Results.covariances) 
                 for i = 1:numel(p.Results.means)
-                    dists{end+1} = BREW.distributions.Gaussian(p.Results.means{i}, p.Results.covariances{i});
+                    dists{end+1} = BREW.distributions.Gaussian(p.Results.means{i}(:), p.Results.covariances{i});
                 end 
             end
-            obj@BREW.distributions.BaseMixtureModel(dists, weights);
+            obj@BREW.distributions.BaseMixtureModel(dists, p.Results.weights);
+        end
+
+        function val = get.means(obj)
+            val = cellfun(@(d) d.mean, obj.distributions, 'UniformOutput', false);
+        end
+        function obj = set.means(obj, val)
+            for i = 1:numel(obj.distributions)
+                obj.distributions{i}.mean = val{i};
+            end
+        end
+        function val = get.covariances(obj)
+            val = cellfun(@(d) d.covariance, obj.distributions, 'UniformOutput', false);
+        end
+        function obj = set.covariances(obj, val)
+            for i = 1:numel(obj.distributions)
+                obj.distributions{i}.covariance = val{i};
+            end
         end
         
         function newObj = copy(obj)
@@ -42,23 +59,6 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
             new_covariances = obj.covariances;
             new_weights = obj.weights;
             newObj = BREW.distributions.GaussianMixture(new_means, new_covariances, new_weights);
-        end
-        
-        function val = get.means(obj)
-            val = cellfun(@(d) d.mean, obj.distributions, 'UniformOutput', false);
-        end
-        function set.means(obj, val)
-            for i = 1:numel(obj.distributions)
-                obj.distributions{i}.mean = val{i};
-            end
-        end
-        function val = get.covariances(obj)
-            val = cellfun(@(d) d.covariance, obj.distributions, 'UniformOutput', false);
-        end
-        function set.covariances(obj, val)
-            for i = 1:numel(obj.distributions)
-                obj.distributions{i}.covariance = val{i};
-            end
         end
         
         function s = sample(obj, numSamples)
@@ -79,6 +79,17 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
             for i = 1:numel(obj.distributions)
                 p = p + obj.weights(i) * obj.distributions{i}.pdf(x);
             end
+        end
+
+         function measurements = sample_measurements(obj, xy_inds)
+
+            all_meas = []; 
+            for i = 1:numel(obj.distributions)
+                mi = obj.distributions{i}.sample_measurements(xy_inds);
+                all_meas = [all_meas, mi];  
+            end
+        
+            measurements = all_meas;  
         end
         
         function disp(obj)
