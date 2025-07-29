@@ -20,7 +20,7 @@ truth = BREW.distributions.GGIWMixture( ...
     'weights', weights);
 
 % define truth target motion
-target_motion = BREW.dynamics.common.Integrator_3D();
+target_motion = BREW.dynamics.Integrator_3D();
 
 % generate measurements 
 
@@ -34,8 +34,8 @@ measurements = {};
 % initialize filter(s)
 H = [eye(3) zeros(3, length(means{1})-3)];
 R = 0.2 * eye(3); % Measurement noise
-process_noise = 0.01 * eye(length(means{1}));
-inner_filter = BREW.filters.ExtendedKalmanFilter('dyn_obj',target_motion, ...
+process_noise = 0.01 * eye(length(means{1})); 
+inner_filter = BREW.filters.GGIWEKF('dyn_obj',target_motion, ...
     'H',H,'process_noise',process_noise,'measurement_noise', R);
 
 alpha = {10};
@@ -111,4 +111,4 @@ for k = 1:length(t)
     end
 
     pause(0.3)
-end
+end 

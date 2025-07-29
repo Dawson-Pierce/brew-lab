@@ -14,7 +14,7 @@ GGIW_truth = BREW.distributions.GGIW(alpha, beta, meanVal, covVal, IWdof, IWshap
 % --- Motion Model ---
 dt = 0.2;
 num_steps = 100;
-motion = BREW.dynamics.common.Integrator_3D();
+motion = BREW.dynamics.Integrator_3D();
 
 % --- Measurement Model ---
 H = [eye(3), zeros(3, length(meanVal)-3)]; % Extract x, y, z
@@ -58,7 +58,7 @@ for k = 1:num_steps
     meas = GGIW_truth.sample_measurements([1 2 3]);
     
     % --- EKF Predict ---
-    GGIW_pred = EKF.predict([], dt, GGIW_est, 'tau',1); 
+    GGIW_pred = EKF.predict(dt, GGIW_est, 'tau',1); 
 
     % --- EKF Correct ---
     [GGIW_est, lik] = EKF.correct(dt, meas, GGIW_pred); 

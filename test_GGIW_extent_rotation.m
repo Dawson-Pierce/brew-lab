@@ -15,7 +15,7 @@ dt = 0.2; % time step
 num_steps = 100;
 
 % Create the motion model
-motion = BREW.dynamics.common.Integrator_3D_euler();
+motion = BREW.dynamics.Integrator_3D_euler();
 
 % Set up figure
 figure; 
