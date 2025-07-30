@@ -33,10 +33,10 @@ classdef GGIWEKF < BREW.filters.FiltersBase
             prevIWshape = prevDist.IWshape; 
 
             if ~isempty(dyn_obj)
-                nextState = dyn_obj.propagateState(dt, prevState, u);
+                nextState = dyn_obj.propagateState(dt, prevState);
                 F =  dyn_obj.getStateMat(dt, prevState);
             elseif ~isempty(obj.dyn_obj_)
-                nextState = obj.dyn_obj_.propagateState(dt, prevState, u);
+                nextState = obj.dyn_obj_.propagateState(dt, prevState);
                 F =  obj.dyn_obj_.getStateMat(dt, prevState);
             end
             if ~isempty(proc_noise)

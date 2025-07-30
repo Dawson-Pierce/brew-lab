@@ -3,7 +3,14 @@ classdef DoubleIntegrator_3D_euler < BREW.dynamics.DynamicsBase
         stateNames = {'x','y','z','vx','vy','vz','ax','ay','az','phi','theta','psi','p','q','r','alpha_x','alpha_y','alpha_z'}
     end
     methods
-        function nextState = propagateState(obj, dt, state, u)
+        function nextState = propagateState(obj, dt, state, varargin)
+            p = inputParser;
+            p.CaseSensitive = true;
+
+            addParameter(p, 'u', 0); 
+
+            parse(p, varargin{:});
+
             pos = state(1:3);
             vel = state(4:6);
             acc = state(7:9);
@@ -23,7 +30,7 @@ classdef DoubleIntegrator_3D_euler < BREW.dynamics.DynamicsBase
 
             G = obj.getInputMat(dt, state);
 
-            nextState = [pos_next; vel_next; acc_next; eul_next; rates_next; alpha_next] + G*u;
+            nextState = [pos_next; vel_next; acc_next; eul_next; rates_next; alpha_next] + G*p.Results.u;
         end
         function F = getStateMat(obj, dt, state, varargin)
             F = eye(18);

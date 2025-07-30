@@ -75,14 +75,14 @@ for k = 1:length(t)
     cla(ax);
     timestep = t(k);
     for kk = 1:length(truth.distributions) 
-        truth.means{kk} = target_motion.propagateState(timestep,dt,truth.means{kk});
+        truth.means{kk} = target_motion.propagateState(dt,truth.means{kk});
     end
     measurements{k} = truth.sample_measurements(); % Generate measurements from the truth distribution
 
     scatter3(measurements{k}(1,:),measurements{k}(2,:),measurements{k}(3,:),'w*','SizeData',0.5)
 
     % PHD stuff
-    phd.predict(timestep,dt,{}); % Predict the state of the PHD filter
+    phd.predict(dt,{}); % Predict the state of the PHD filter
     phd.correct(dt,measurements{k}); % Update the PHD filter with the new measurements
 
     fprintf("timestep: %f \n",t(k)) 

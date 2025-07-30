@@ -19,7 +19,7 @@ classdef (Abstract) DynamicsBase < handle
     end
 
     methods (Abstract)
-        nextState = propagateState(obj, dt, state, u)
+        nextState = propagateState(obj, dt, state, varargin)
         stateMat = getStateMat(obj, dt, state, varargin)
         inputMat = getInputMat(obj, dt, state, varargin)
     end
