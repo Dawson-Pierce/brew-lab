@@ -56,12 +56,12 @@ classdef PHD < BREW.multi_target.RFSBase
 
         end
 
-        function obj = predict(obj, timestep, dt, varargin)
+        function obj = predict(obj, dt, varargin)
             if obj.enable_spawn
                 spawn_mix = obj.gen_spawned_targets(obj.Mix);
             end
 
-            obj.Mix = obj.predict_prob_density(timestep,dt,obj.Mix,varargin);
+            obj.Mix = obj.predict_prob_density(dt,obj.Mix,varargin);
 
             if obj.enable_spawn
                 obj.Mix.addComponents(spawn_mix);
@@ -151,7 +151,7 @@ classdef PHD < BREW.multi_target.RFSBase
             new_mix.weights = weights;
         end
 
-        function new_mix = predict_prob_density(obj,timestep,dt,mix,varargin)
+        function new_mix = predict_prob_density(obj,dt,mix,varargin)
             % Predict the mixture probabilities
 
             new_mix = mix;
@@ -161,7 +161,7 @@ classdef PHD < BREW.multi_target.RFSBase
             end
 
             for k = 1:length(mix) 
-                new_mix.distributions{k} = obj.filter_.predict(timestep,dt,mix.distributions{k});
+                new_mix.distributions{k} = obj.filter_.predict(dt,mix.distributions{k});
             end
 
         end
