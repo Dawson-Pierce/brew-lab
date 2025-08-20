@@ -64,10 +64,10 @@ classdef PHD < BREW.multi_target.RFSBase
             obj.Mix = obj.predict_prob_density(dt,obj.Mix,varargin);
 
             if obj.enable_spawn
-                obj.Mix.addComponents(spawn_mix);
+                obj.Mix = obj.Mix.addComponents(spawn_mix);
             end 
 
-            obj.Mix.addComponents(obj.birth_model);
+            obj.Mix = obj.Mix.addComponents(obj.birth_model);
         end
 
         function obj = correct(obj, dt, meas, varargin)

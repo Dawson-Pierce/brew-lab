@@ -1,45 +1,52 @@
-classdef EKF < BREW.filters.FiltersBase
-    % Extended Kalman Filter / Kalman Filter class for gaussians
-
-    % most of the stuff for dynamics model and measurement model is 
-    % inherited, just update the predict and correct methodologies 
-
-    % dynamics model also has capability to be an input into the filter so
-    % we can change it mid tracking application
+classdef TrajectoryGaussianEKF < BREW.filters.FiltersBase
+    % Extended Kalman Filter / Kalman Filter class for gaussian
+    % trajectories
 
     methods  
         function nextDist = predict(obj, dt, prevDist, varargin)
             p = inputParser; 
             p.CaseSensitive = true; 
-            addParameter(p,'u',0);
+            p.KeepUnmatched   = true; 
             addParameter(p,'dyn_obj',[]); % adds capability to change dynamics model
             addParameter(p,'process_noise',[]); 
 
             % Parse known arguments
             parse(p, varargin{:});
 
-            u = p.Results.u;
+            fn  = fieldnames(p.Unmatched);
+            val = struct2cell(p.Unmatched);
+            unmatched = reshape([fn.'; val.'], 1, []);
 
             dyn_obj = p.Results.dyn_obj;
             proc_noise = p.Results.process_noise; 
 
-            prevState = prevDist.mean;
-            prevCov = prevDist.covariance; 
+            prevState = prevDist.getLastState();
+            prevCov = prevDist.covariances; 
 
             if ~isempty(dyn_obj)
-                nextState = dyn_obj.propagateState(dt, prevState, 'u', u);
+                nextState = dyn_obj.propagateState(dt, prevState, unmatched{:});
                 F =  dyn_obj.getStateMat(dt, prevState);
             elseif ~isempty(obj.dyn_obj_)
-                nextState = obj.dyn_obj_.propagateState(dt, prevState, 'u', u);
+                nextState = obj.dyn_obj_.propagateState(dt, prevState, unmatched{:});
                 F =  obj.dyn_obj_.getStateMat(dt, prevState);
             end
+
+            F_dot = kron([zeros(1,prevDist.window_size-1), 1],F);
+
             if ~isempty(proc_noise)
-                nextCov = F * prevCov * F' + proc_noise;
+                newCov = [prevCov, prevCov * F_dot'; F_dot * prevCov, F_dot * prevCov * F_dot' + proc_noise]; % F * prevCov * F' + proc_noise;
             else
-                nextCov = F * prevCov * F' + obj.process_noise;
+                newCov = [prevCov, prevCov * F_dot'; F_dot * prevCov, F_dot * prevCov * F_dot' + obj.process_noise]; %newCov = F * prevCov * F' + obj.process_noise;
             end 
 
-            nextDist = BREW.distributions.Gaussian(nextState, nextCov);
+            % nextState = F_dot * prevDist.means;
+
+            newMean = [prevDist.means; nextState];
+
+            nextDist = prevDist;
+            nextDist.means = newMean;
+            nextDist.covariances = newCov;
+            nextDist.window_size = nextDist.window_size+1;
         
         end
         function [nextDist, likelihood] = correct(obj, dt, meas, prevDist, varargin) 
@@ -57,10 +64,8 @@ classdef EKF < BREW.filters.FiltersBase
             H_input = p.Results.H;
             meas_noise = p.Results.meas_noise;
 
-            prevState = prevDist.mean;
-            prevCov = prevDist.covariance; 
-
-            d = prevDist.d;
+            prevState = prevDist.getLastState();
+            prevCov = prevDist.covariances;  
 
             if ~isempty(h_input)
                 est_meas = h_input(prevState);
@@ -78,20 +83,23 @@ classdef EKF < BREW.filters.FiltersBase
                 H = obj.getMeasurementMatrix(prevState);
             end 
 
+            H_dot = kron([zeros(1,prevDist.window_size-1), 1],H);
+
+            % est_meas = H_dot * prevDist.means;
+
             epsilon = meas - est_meas; 
 
             if ~isempty(meas_noise)
-                S = H * prevCov * H' + meas_noise; 
+                S = H_dot * prevCov * H_dot' + meas_noise; 
             else
-                S = H * prevCov * H' + obj.measurement_noise; 
+                S = H_dot * prevCov * H_dot' + obj.measurement_noise; 
             end
 
-            K = prevCov * H' * S^-1;
+            K = prevCov * H_dot' * S^-1;
 
-            nextState = prevState + K * epsilon;
-            nextCov = (eye(length(prevState)) - K * H) * prevCov; % prevCov - K * S * K'; 
-
-            nextDist = BREW.distributions.Gaussian(nextState,nextCov); 
+            nextDist = prevDist; 
+            nextDist.means = prevDist.means + K * epsilon;
+            nextDist.covariances = prevDist.covariances - K * H_dot * prevDist.covariances;
             
             likelihood = mvnpdf(meas, est_meas, S);
         
