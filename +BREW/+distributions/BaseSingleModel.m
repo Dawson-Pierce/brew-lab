@@ -3,14 +3,11 @@ classdef BaseSingleModel
     % Defines required functions and base attributes for the distribution.
     
     properties 
-        monteCarloSize = 1e4; % Number of samples for MC operations
+
     end
     
     methods
-        function obj = BaseSingleModel(monteCarloSize) 
-            if nargin > 0
-                obj.monteCarloSize = monteCarloSize;
-            end
+        function obj = BaseSingleModel() 
         end
         
         function s = sample(obj, varargin)

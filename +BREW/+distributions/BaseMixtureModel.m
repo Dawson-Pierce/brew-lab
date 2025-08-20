@@ -4,20 +4,16 @@ classdef BaseMixtureModel
     
     properties
         distributions = {}  % Cell array of BaseSingleModel objects
-        weights = []        % Array of weights
-        monteCarloSize = 1e4; 
+        weights = []        % Array of weights 
     end
     
     methods
-        function obj = BaseMixtureModel(distributions, weights, monteCarloSize)
+        function obj = BaseMixtureModel(distributions, weights)
             if nargin > 0 && ~isempty(distributions)
                 obj.distributions = distributions;
             end
             if nargin > 1 && ~isempty(weights)
                 obj.weights = weights;
-            end
-            if nargin > 2
-                obj.monteCarloSize = monteCarloSize;
             end
         end 
 
