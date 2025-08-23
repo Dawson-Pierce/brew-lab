@@ -1,7 +1,7 @@
 # Bayesian Recursive Estimation Workspace
 ----------------------------------------
 
-A custom MATLAB package for navigation and target tracking applications. 
+A custom MATLAB package for target tracking applications. 
 
 This package holds general dynamics models, different distributions, and filters that work together. 
 
