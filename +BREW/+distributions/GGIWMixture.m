@@ -179,5 +179,130 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
                 obj.distributions{i}.plot_distribution(ax, plt_inds, h, c);
             end
         end
+
+        function obj = merge(obj, threshold)
+            % MERGE  Average-merge nearby GGIW components 
+                if nargin < 2 || isempty(threshold), threshold = 4; end
+            
+                if isempty(obj.distributions) || numel(obj.distributions) < 2
+                    return;
+                end
+            
+                % pull current params as cell arrays / vectors
+                means  = obj.means;         % cell{N} of column vectors
+                covs   = obj.covariances;   % cell{N} of matrices
+                alphas = obj.alphas;        % cell{N} of scalars
+                betas  = obj.betas;         % cell{N} of scalars
+                vIW    = obj.IWdofs;        % cell{N} of scalars
+                VIW    = obj.IWshapes;      % cell{N} of matrices
+            
+                w = obj.weights(:).';
+                if isempty(w), w = ones(1, numel(means)); end
+            
+                N = numel(means);
+                remaining = true(1, N);
+            
+                % accumulators for merged mixture
+                w_lst = [];               % 1×K
+                m_lst = {};               % 1×K cells
+                P_lst = {};               % 1×K cells
+                a_lst = {}; b_lst = {};   % 1×K cells
+                v_lst = {}; V_lst = {};   % 1×K cells
+            
+                while any(remaining)
+                    inds = find(remaining);
+                    % pick the heaviest remaining component as reference (jj)
+                    [~, k] = max(w(inds));
+                    jj = inds(k);
+            
+                    % Cholesky of reference covariance for gating
+                    Cjj = covs{jj};
+                    Cjj = (Cjj + Cjj.')/2;
+                    [R, p] = chol(Cjj);
+                    if p ~= 0
+                        epsj = 1e-9 * max(1, trace(Cjj)/size(Cjj,1));
+                        Cjj = Cjj + epsj * eye(size(Cjj));
+                        R = chol(Cjj);
+                    end
+            
+                    % collect indices that fall within gate of jj
+                    comp_mask = false(1, N);
+                    for ii = inds
+                        d = means{ii} - means{jj};
+                        y = R \ d;                 % Mahalanobis via chol
+                        val = y' * y;              % d' * inv(Cjj) * d
+                        if val <= threshold
+                            comp_mask(ii) = true;
+                        end
+                    end
+                    grp = find(comp_mask);
+                    w_new = sum(w(grp));
+            
+                    % if degenerate weights, just drop them from consideration
+                    if w_new <= 0
+                        remaining(grp) = false;
+                        continue;
+                    end
+            
+                    % weighted averages
+                    % mean
+                    m_new = 0;
+                    for ii = grp
+                        m_new = m_new + w(ii) * means{ii};
+                    end
+                    m_new = m_new / w_new;
+            
+                    % covariance (simple weighted average; symmetrize)
+                    P_sum = 0;
+                    for ii = grp
+                        P_sum = P_sum + w(ii) * covs{ii};
+                    end
+                    P_new = P_sum / w_new;
+                    P_new = 0.5 * (P_new + P_new.');
+            
+                    % gamma params
+                    a_new = 0; b_new = 0;
+                    for ii = grp
+                        a_new = a_new + w(ii) * alphas{ii};
+                        b_new = b_new + w(ii) * betas{ii};
+                    end
+                    a_new = a_new / w_new;
+                    b_new = b_new / w_new;
+            
+                    % IW params (dof scalar, shape matrix; symmetrize shape)
+                    v_new = 0; V_sum = 0;
+                    for ii = grp
+                        v_new = v_new + w(ii) * vIW{ii};
+                        V_sum = V_sum + w(ii) * VIW{ii};
+                    end
+                    v_new = v_new / w_new;
+                    V_new = V_sum / w_new;
+                    V_new = 0.5 * (V_new + V_new.');
+            
+                    % append merged component
+                    w_lst(end+1) = w_new;                          %#ok<AGROW>
+                    m_lst{end+1} = m_new;                          %#ok<AGROW>
+                    P_lst{end+1} = P_new;                          %#ok<AGROW>
+                    a_lst{end+1} = a_new;                          %#ok<AGROW>
+                    b_lst{end+1} = b_new;                          %#ok<AGROW>
+                    v_lst{end+1} = v_new;                          %#ok<AGROW>
+                    V_lst{end+1} = V_new;                          %#ok<AGROW>
+            
+                    % remove grouped comps from remaining set
+                    remaining(grp) = false;
+                end
+            
+                % rebuild mixture from averaged groups 
+                obj = BREW.distributions.GGIWMixture( ...
+                    'alphas',      a_lst, ...
+                    'betas',       b_lst, ...
+                    'means',       m_lst, ...
+                    'covariances', P_lst, ...
+                    'IWdofs',      v_lst, ...
+                    'IWshapes',    V_lst, ...
+                    'weights',     w_lst );
+            end
+
+
     end
 end 

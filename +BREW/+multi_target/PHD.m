@@ -31,7 +31,7 @@ classdef PHD < BREW.multi_target.RFSBase
             addParameter(p,'prune_threshold',0.0001)
             addParameter(p,'max_terms',100)
             addParameter(p,'extract_threshold',0.5)
-            % addParameter(p,'merge_threshold',4)
+            addParameter(p,'merge_threshold',4)
             addParameter(p,'cluster_obj',[])
 
             parse(p, varargin{:});
@@ -48,7 +48,7 @@ classdef PHD < BREW.multi_target.RFSBase
             obj.prune_threshold = p.Results.prune_threshold;
             obj.max_terms = p.Results.max_terms;
             obj.extract_threshold = p.Results.extract_threshold;
-            % obj.merge_threshold = p.Results.merge_threshold;
+            obj.merge_threshold = p.Results.merge_threshold;
             obj.cluster_obj = p.Results.cluster_obj;
 
             obj.Mix = obj.birth_model;
@@ -68,6 +68,14 @@ classdef PHD < BREW.multi_target.RFSBase
             end 
 
             obj.Mix = obj.Mix.addComponents(obj.birth_model);
+
+            for kk = 1:length(obj.birth_model)
+                if isa(obj.birth_model.distributions{kk},"BREW.distributions.TrajectoryBaseModel")
+                    prev = obj.birth_model.distributions{kk}.init_idx;
+                    obj.birth_model.distributions{kk}.init_idx = prev + 1;
+                end
+            end
+
         end
 
         function obj = correct(obj, dt, meas, varargin)
@@ -96,7 +104,7 @@ classdef PHD < BREW.multi_target.RFSBase
             % Correct the mixture for each measurement
             obj.Mix = obj.correct_prob_density(dt, meas_new, obj.Mix, varargin);
 
-            obj.Mix.addComponents(undetected_mix);
+            obj.Mix = obj.Mix.addComponents(undetected_mix);
 
         end
 
@@ -107,6 +115,7 @@ classdef PHD < BREW.multi_target.RFSBase
 
         function extracted_dist = cleanup(obj)
             obj.prune();
+            obj.merge();
             obj.cap();
             extracted_dist = obj.extract();
         end 
@@ -116,7 +125,11 @@ classdef PHD < BREW.multi_target.RFSBase
 
         function obj = prune(obj) 
             idx = find(obj.Mix.weights < obj.prune_threshold); 
-            obj.Mix.removeComponents(idx);
+            obj.Mix = obj.Mix.removeComponents(idx);
+        end
+
+        function obj = merge(obj)
+            obj.Mix = obj.Mix.merge(obj.merge_threshold);
         end
 
         function obj = cap(obj)
@@ -125,7 +138,7 @@ classdef PHD < BREW.multi_target.RFSBase
                 [~, idx] = sort(obj.Mix.weights, 'descend');
 
                 dist = obj.Mix.distributions(idx(1:obj.max_terms));
-                weights = obj.Mix.weights(idx(1:obj.max_terms)) * w / (sum(obj.Mix.weights));
+                weights = obj.Mix.weights(idx(1:obj.max_terms)); % * w / (sum(obj.Mix.weights(idx(1:obj.max_terms))));
 
                 obj.Mix.distributions = dist;
                 obj.Mix.weights = weights;
@@ -143,7 +156,7 @@ classdef PHD < BREW.multi_target.RFSBase
                     [dist{end+1},qz] = obj.filter_.correct(dt,meas{z},mix.distributions{k});
                     w_lst(end+1) = qz * mix.weights(k);
                 end
-                weights = [weights, w_lst ./ (obj.clutter_rate + obj.clutter_density + sum(w_lst))];
+                weights = [weights, w_lst ./ (obj.clutter_rate * obj.clutter_density + sum(w_lst))];
             end
 
             new_mix = mix;

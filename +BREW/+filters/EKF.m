@@ -8,17 +8,15 @@ classdef EKF < BREW.filters.FiltersBase
     % we can change it mid tracking application
 
     methods  
+
         function nextDist = predict(obj, dt, prevDist, varargin)
             p = inputParser; 
             p.CaseSensitive = true; 
-            addParameter(p,'u',0);
             addParameter(p,'dyn_obj',[]); % adds capability to change dynamics model
             addParameter(p,'process_noise',[]); 
 
             % Parse known arguments
-            parse(p, varargin{:});
-
-            u = p.Results.u;
+            parse(p, varargin{:}); 
 
             dyn_obj = p.Results.dyn_obj;
             proc_noise = p.Results.process_noise; 
@@ -27,10 +25,10 @@ classdef EKF < BREW.filters.FiltersBase
             prevCov = prevDist.covariance; 
 
             if ~isempty(dyn_obj)
-                nextState = dyn_obj.propagateState(dt, prevState, 'u', u);
+                nextState = dyn_obj.propagateState(dt, prevState);
                 F =  dyn_obj.getStateMat(dt, prevState);
             elseif ~isempty(obj.dyn_obj_)
-                nextState = obj.dyn_obj_.propagateState(dt, prevState, 'u', u);
+                nextState = obj.dyn_obj_.propagateState(dt, prevState);
                 F =  obj.dyn_obj_.getStateMat(dt, prevState);
             end
             if ~isempty(proc_noise)
@@ -58,14 +56,12 @@ classdef EKF < BREW.filters.FiltersBase
             meas_noise = p.Results.meas_noise;
 
             prevState = prevDist.mean;
-            prevCov = prevDist.covariance; 
-
-            d = prevDist.d;
+            prevCov = prevDist.covariance;  
 
             if ~isempty(h_input)
                 est_meas = h_input(prevState);
             else
-                est_meas = obj.estimate_measurement(prevState); 
+                est_meas = obj.estimate_measurement(prevState);
             end 
 
             if ~isempty(H_input)
@@ -78,18 +74,21 @@ classdef EKF < BREW.filters.FiltersBase
                 H = obj.getMeasurementMatrix(prevState);
             end 
 
-            epsilon = meas - est_meas; 
+            epsilon = meas - est_meas;
 
             if ~isempty(meas_noise)
-                S = H * prevCov * H' + meas_noise; 
+                R = meas_noise; 
             else
-                S = H * prevCov * H' + obj.measurement_noise; 
+                R = obj.measurement_noise; 
             end
 
-            K = prevCov * H' * S^-1;
+            S = H * prevCov * H' + R;
+            S = 0.5 * (S + S');
+            K = (prevCov * H') / S;
 
             nextState = prevState + K * epsilon;
-            nextCov = (eye(length(prevState)) - K * H) * prevCov; % prevCov - K * S * K'; 
+            I = eye(length(prevState));
+            nextCov  = (I - K*H) * prevCov * (I - K*H)' + K * R * K'; 
 
             nextDist = BREW.distributions.Gaussian(nextState,nextCov); 
             

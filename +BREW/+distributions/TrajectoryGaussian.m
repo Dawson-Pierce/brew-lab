@@ -45,17 +45,19 @@ classdef TrajectoryGaussian < BREW.distributions.TrajectoryBaseModel
         function plot(obj, plt_inds, varargin)
             p = inputParser;
             addParameter(p,'c','w');
-            addParameter(p,'lineWidth',0.8);
+            addParameter(p,'ax',gca)
+            addParameter(p,'LineWidth',0.8);
+            addParameter(p,'LineStyle','-'); 
             parse(p, varargin{:});
 
             states = obj.RearrangeStates();
             if length(plt_inds) == 3
-                plot3(states(plt_inds(1),:), states(plt_inds(2),:), states(plt_inds(3),:), p.Results.c, 'LineWidth', p.Results.lineWidth);
+                plot3(states(plt_inds(1),:), states(plt_inds(2),:), states(plt_inds(3),:), 'Color', p.Results.c,'LineStyle', p.Results.LineStyle, 'LineWidth', p.Results.LineWidth);
                 xlabel('X-axis');
                 ylabel('Y-axis');
                 zlabel('Z-axis');
             else
-                plot(states(plt_inds(1),:), states(plt_inds(2),:), p.Results.c, 'LineWidth', p.Results.lineWidth);
+                plot(p.Results.ax, states(plt_inds(1),:), states(plt_inds(2),:), 'Color', p.Results.c,'LineStyle', p.Results.LineStyle, 'LineWidth', p.Results.LineWidth);
                 xlabel('X-axis');
                 ylabel('Y-axis'); 
             end
