@@ -4,7 +4,7 @@ clear; clc; close all
 
 means = {[0; -20; 1; 1/2], [0; 20; 1; -1/2], [0; 0; 1; 0]};
 covariances = repmat({zeros(4)},1,3); 
-idx = {1, 1, 1};
+idx = {1, 1, 5};
 weights = [1, 1, 1];
 
 truth = BREW.distributions.TrajectoryGaussianMixture( ...
@@ -39,8 +39,8 @@ t = 0:dt:80;
 %% PHD setup
 
 phd = BREW.multi_target.PHD('filter',ekf, 'birth_model', birth,...
-    'prob_detection', 0.8, 'prob_survive', 0.98, 'max_terms',50, ...
-    'extract_threshold',0.5, 'merge_threshold',0.5);
+    'prob_detection', 0.8, 'prob_survive', 0.98, 'max_terms',25, ...
+    'extract_threshold',0.5, 'merge_threshold',4);
 
 %% Running the loop
 
