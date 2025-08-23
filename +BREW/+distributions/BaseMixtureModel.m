@@ -71,5 +71,10 @@ classdef BaseMixtureModel
                 obj.weights(end+1) = mix.weights(i);
             end
         end
+
+        function obj = merge(obj,threshold)
+            % Placeholder for merging components in mixture
+            % This function should be overwritten
+        end
     end
 end 

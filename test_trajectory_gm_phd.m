@@ -2,9 +2,9 @@ clear; clc; close all
 
 %% Target setup
 
-means = {[0; -20; 1; 1/2], [0; 20; 1; -1/2], [0; 0; 2; 0]};
+means = {[0; -20; 1; 1/2], [0; 20; 1; -1/2], [0; 0; 1; 0]};
 covariances = repmat({zeros(4)},1,3); 
-idx = {1, 30, 65};
+idx = {1, 1, 1};
 weights = [1, 1, 1];
 
 truth = BREW.distributions.TrajectoryGaussianMixture( ...
@@ -14,36 +14,39 @@ truth = BREW.distributions.TrajectoryGaussianMixture( ...
     'weights',weights); 
 
 
-%% inner filter setup
+%% birth model setup
 
 birth = BREW.distributions.TrajectoryGaussianMixture( ...
     'idx',{1}, ...
     'means',{[0; 0; 1; 0]}, ...
-    'covariances',{diag([10, 10, 0.1, 5])}, ...
+    'covariances',{diag([1, 10, 1, 1])}, ...
     'weights',[1]);
+
+%% inner filter setup
 
 dyn = BREW.dynamics.Integrator_2D();
 
 ekf = BREW.filters.TrajectoryGaussianEKF( ...
     'dyn_obj',dyn, ...
-    'process_noise',0.1 * eye(4), ...
+    'process_noise',diag([0.1 0.1 0.1 0.05]), ...
     'H',[1 0 0 0; 0 1 0 0], ...
-    'measurement_noise', 10 * [1; 1]);
+    'measurement_noise', 0.2 * [1; 1]);
 
 dt = 1;
 
-t = 0:dt:100;
+t = 0:dt:80;
 
 %% PHD setup
 
 phd = BREW.multi_target.PHD('filter',ekf, 'birth_model', birth,...
-    'prob_detection', 0.9, 'prob_survive', 0.8, 'max_terms',50);
+    'prob_detection', 0.8, 'prob_survive', 0.98, 'max_terms',50, ...
+    'extract_threshold',0.5, 'merge_threshold',0.5);
 
 %% Running the loop
 
 meas_hst = [];
 
-meas_cov = diag([0.25, 0.25]);
+meas_cov = diag([0.05, 0.05]);
 
 for k = 1:length(t)
     
@@ -59,18 +62,22 @@ for k = 1:length(t)
 
     phd.predict(dt,{}); 
 
-    for kk = 1:length(phd.birth_model)
-        phd.birth_model.distributions{kk}.init_idx = k; % need for trajectory filter
-    end
+    % for kk = 1:length(phd.birth_model)
+    %     phd.birth_model.distributions{kk}.init_idx = k; % need for trajectory filter
+    % end
 
-    phd.correct(dt, meas);  
+    phd.correct(dt, meas); 
 
     est_mix = phd.cleanup();
 
     % Plotting
     scatter(meas_hst(1,:),meas_hst(2,:),'w*'); grid on; hold on 
 
-    est_mix.plot([1 2],'c','r-','lineWidth',2); hold off
+    % Plotting the non-extracted terms to illustrate pruned mixture / how
+    % trajectory set theory RFS is doing its job
+    phd.Mix.plot([1 2],'colors','r','LineWidth',0.05,'LineStyle','--'); 
+
+    est_mix.plot([1 2],'LineWidth',3); hold off
 
     xlim([-20 120])
     ylim([-70 70])

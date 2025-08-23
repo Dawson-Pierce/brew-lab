@@ -38,6 +38,7 @@ classdef Gaussian < BREW.distributions.BaseSingleModel
             fprintf('Covariance = \n');
             disp(obj.covariance);
         end
+        
         function plot_distribution(obj, ax, plt_inds, num_std, color) 
             if nargin < 2 || isempty(ax), ax = gca; end
             if nargin < 3 || isempty(plt_inds)

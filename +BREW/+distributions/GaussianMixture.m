@@ -30,7 +30,7 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
 
             if ~isempty(p.Results.means) && ~isempty(p.Results.covariances) 
                 for i = 1:numel(p.Results.means)
-                    dists{end+1} = BREW.distributions.Gaussian(p.Results.means{i}(:), p.Results.covariances{i});
+                    dists{end+1} = BREW.distributions.Gaussian(p.Results.means{i}, p.Results.covariances{i});
                 end 
             end
             obj@BREW.distributions.BaseMixtureModel(dists, p.Results.weights);
@@ -101,6 +101,91 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
                     fprintf('Component %d (weight = %g):\n', i, obj.weights(i));
                 end
                 disp(obj.distributions{i});
+            end
+        end
+
+        function obj = merge(obj, threshold)
+            if nargin < 2
+                threshold = 4; % default Mahalanobis^2 threshold
+            end
+        
+            means_copy = obj.means;
+            covs = obj.covariances;
+            weights = obj.weights;
+        
+            keepMerging = true;
+            while keepMerging && numel(means_copy) > 1
+                keepMerging = false;
+                N = numel(means_copy);
+        
+                % find closest pair
+                minDist = inf;
+                pair = [];
+                for i = 1:N
+                    for j = i+1:N
+                        diff = means_copy{i} - means_copy{j};
+                        % symmetric Mahalanobis distance using avg covariance
+                        C = (covs{i} + covs{j})/2;
+                        d2 = diff' * (C \ diff);
+                        if d2 < minDist
+                            minDist = d2;
+                            pair = [i j];
+                        end
+                    end
+                end
+        
+                if minDist < threshold
+                    i = pair(1); j = pair(2);
+        
+                    wi = weights(i); wj = weights(j);
+                    mi = means_copy{i}; mj = means_copy{j};
+                    Pi = covs{i}; Pj = covs{j};
+                    w = wi + wj;
+                    m = (wi*mi + wj*mj) / w;
+                    P = (wi*(Pi + (mi-m)*(mi-m)') + ...
+                         wj*(Pj + (mj-m)*(mj-m)')) / w;
+        
+                    % replace i with merged, delete j
+                    means_copy{i} = m;
+                    covs{i} = P;
+                    weights(i) = w;
+        
+                    means_copy(j) = [];
+                    covs(j) = [];
+                    weights(j) = [];
+        
+                    keepMerging = true;
+                end
+            end
+        
+            obj = BREW.distributions.GaussianMixture( ...
+                'means', means_copy, ...
+                'covariances', covs, ...
+                'weights', weights );
+        end
+
+        function plot_distributions(obj, ax, plt_inds, num_std, colors)
+            % Plot all GGIW components in 2D (or 3D if plt_inds has 3 elements)
+            if nargin < 2 || isempty(ax),        ax = gca;       end
+            if nargin < 3 || isempty(plt_inds),   plt_inds = [1 2]; end
+            if nargin < 4 || isempty(num_std),          num_std = 1;      end
+        
+            n = numel(obj.distributions);
+        
+            % if no colors given, pull an n‐by‐3 list from lines
+            if nargin < 5 || isempty(colors)
+                colors = lines(n);
+            end
+        
+            % if user passed a single color (char or 1×3), replicate it
+            if (ischar(colors) && size(colors,1)==1) || (isnumeric(colors) && isequal(size(colors),[1,3]))
+                colors = repmat(colors, n, 1);
+            end
+        
+            for i = 1:n
+                % pick the i-th row of colors as an RGB triplet
+                c = colors(i,:);
+                obj.distributions{i}.plot_distribution(ax, plt_inds, num_std, c);
             end
         end
         
