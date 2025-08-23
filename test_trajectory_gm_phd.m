@@ -71,13 +71,13 @@ for k = 1:length(t)
     est_mix = phd.cleanup();
 
     % Plotting
-    scatter(meas_hst(1,:),meas_hst(2,:),'w*'); grid on; hold on 
+    scatter(meas_hst(1,:),meas_hst(2,:), 8,'w*'); grid on; hold on 
 
     % Plotting the non-extracted terms to illustrate pruned mixture / how
     % trajectory set theory RFS is doing its job
     phd.Mix.plot([1 2],'colors','r','LineWidth',0.05,'LineStyle','--'); 
 
-    est_mix.plot([1 2],'LineWidth',3); hold off
+    est_mix.plot([1 2],'LineWidth',2); hold off
 
     xlim([-20 120])
     ylim([-70 70])
