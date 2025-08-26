@@ -2,7 +2,25 @@ classdef TrajectoryGaussianEKF < BREW.filters.FiltersBase
     % Extended Kalman Filter / Kalman Filter class for gaussian
     % trajectories
 
-    methods  
+    properties
+        L_window % For efficient computing of trajectory matrices
+    end
+
+    methods
+        function obj = TrajectoryGaussianEKF(varargin)
+            p = inputParser;
+            p.CaseSensitive = true;
+            p.KeepUnmatched = true; 
+
+            addParameter(p,'L',50)
+
+            parse(p,varargin{:})
+            
+            obj@BREW.filters.FiltersBase(p.Unmatched);
+
+            obj.L_window = p.Results.L;
+
+        end
         function nextDist = predict(obj, dt, prevDist, varargin)
             p = inputParser; 
             p.CaseSensitive = true; 
@@ -11,41 +29,52 @@ classdef TrajectoryGaussianEKF < BREW.filters.FiltersBase
             addParameter(p,'process_noise',[]); 
 
             % Parse known arguments
-            parse(p, varargin{:});
-
-            fn  = fieldnames(p.Unmatched);
-            val = struct2cell(p.Unmatched);
-            unmatched = reshape([fn.'; val.'], 1, []);
+            parse(p, varargin{:}); 
 
             dyn_obj = p.Results.dyn_obj;
             proc_noise = p.Results.process_noise; 
 
+            if (prevDist.window_size < obj.L_window)
+                start_idx = 1;
+            else
+                start_idx = prevDist.state_dim+1;
+            end
+
             prevState = prevDist.getLastState();
-            prevCov = prevDist.covariances; 
+            prevCov = prevDist.covariances(start_idx:end,start_idx:end); 
 
             if ~isempty(dyn_obj)
-                nextState = dyn_obj.propagateState(dt, prevState, unmatched{:});
+                nextState = dyn_obj.propagateState(dt, prevState, p.Unmatched);
                 F =  dyn_obj.getStateMat(dt, prevState);
             elseif ~isempty(obj.dyn_obj_)
-                nextState = obj.dyn_obj_.propagateState(dt, prevState, unmatched{:});
+                nextState = obj.dyn_obj_.propagateState(dt, prevState, p.Unmatched);
                 F =  obj.dyn_obj_.getStateMat(dt, prevState);
             end
 
-            F_dot = kron([zeros(1,prevDist.window_size-1), 1],F);
-
-            if ~isempty(proc_noise)
-                newCov = [prevCov, prevCov * F_dot'; F_dot * prevCov, F_dot * prevCov * F_dot' + proc_noise]; % F * prevCov * F' + proc_noise;
+            if (prevDist.window_size < obj.L_window)
+                F_dot = kron([zeros(1,prevDist.window_size-1), 1],F);
             else
-                newCov = [prevCov, prevCov * F_dot'; F_dot * prevCov, F_dot * prevCov * F_dot' + obj.process_noise]; %newCov = F * prevCov * F' + obj.process_noise;
+                F_dot = kron([zeros(1,obj.L_window-2), 1],F);
+            end
+
+            if isempty(proc_noise)
+                proc_noise = obj.process_noise;
             end 
 
-            % nextState = F_dot * prevDist.means;
+            newCov = [prevCov, prevCov * F_dot'; F_dot * prevCov, F_dot * prevCov * F_dot' + proc_noise]; 
 
-            newMean = [prevDist.means; nextState];
+            newMean = [prevDist.means(start_idx:end); nextState];
 
             nextDist = prevDist;
             nextDist.means = newMean;
             nextDist.covariances = newCov;
+            nextDist.cov_history(:,:,end+1) = newCov((end-prevDist.state_dim+1):end,(end-prevDist.state_dim+1):end);
+
+            if (prevDist.window_size < obj.L_window)
+                nextDist.mean_history = nextDist.RearrangeStates();
+            else
+                nextDist.mean_history(:,end-obj.L_window+2:end+1) = nextDist.RearrangeStates();
+            end
             nextDist.window_size = nextDist.window_size+1;
         
         end
@@ -83,7 +112,13 @@ classdef TrajectoryGaussianEKF < BREW.filters.FiltersBase
                 H = obj.getMeasurementMatrix(prevState);
             end 
 
-            H_dot = kron([zeros(1,prevDist.window_size-1), 1],H);
+            if (prevDist.window_size - obj.L_window) < 0
+                H_dot = kron([zeros(1,prevDist.window_size-1), 1],H);
+            else
+                H_dot = kron([zeros(1,obj.L_window-1), 1],H);
+            end
+
+            % H_dot = kron([zeros(1,prevDist.window_size-1), 1],H);
 
             % est_meas = H_dot * prevDist.means;
 
@@ -97,9 +132,12 @@ classdef TrajectoryGaussianEKF < BREW.filters.FiltersBase
 
             K = prevCov * H_dot' * S^-1;
 
+            newCov = prevDist.covariances - K * H_dot * prevDist.covariances;
+
             nextDist = prevDist; 
             nextDist.means = prevDist.means + K * epsilon;
-            nextDist.covariances = prevDist.covariances - K * H_dot * prevDist.covariances;
+            nextDist.covariances = newCov;
+            nextDist.cov_history(:,:,end) = newCov((end-prevDist.state_dim+1):end,(end-prevDist.state_dim+1):end);
             
             likelihood = mvnpdf(meas, est_meas, S);
         

@@ -61,9 +61,7 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
             p = inputParser;
             p.KeepUnmatched = true;
             addParameter(p,'colors',lines(n))
-            parse(p, varargin{:});
-            
-            nv = namedargs2cell(p.Unmatched); 
+            parse(p, varargin{:}); 
 
             colors = p.Results.colors;
 
@@ -75,20 +73,10 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
             colors = flip(colors);
 
             for k = 1:length(obj.distributions)
-                obj.distributions{k}.plot(plt_inds,'c',colors(k,:),nv{:});
+                obj.distributions{k}.plot(plt_inds,'c',colors(k,:),p.Unmatched);
             end 
         end
         
-        
-        % function newObj = copy(obj)
-        %     % Deep copy of the object
-        %     new_means = obj.mean_trajectories;
-        %     new_covariances = obj.covariance_trajectories;
-        %     new_weights = obj.weights;
-        %     new_idx = obj.idx;
-        %     newObj = BREW.distributions.TrajectoryGaussianMixture(new_idx,new_means, new_covariances, new_weights);
-        % end
-
         function measurements = sample_measurements(obj, xy_inds, idx, meas_cov)
 
             if isempty(idx)
@@ -107,13 +95,7 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
             measurements = all_meas;  
         end
 
-        function obj = merge(obj, threshold)
-        % MERGE  Greedy merge on current time-step for TrajectoryGaussianMixture.
-        %   - Distance: Mahalanobis^2 between last-state means using avg(last cov).
-        %   - Merge: moment-match last-state (m,P); keep heavier track's history
-        %            and cross-covariances; sum weights (no normalization).
-        %   threshold: Mahalanobis^2 gate (e.g., 9). Default 4 if omitted.
-        
+        function obj = merge(obj, threshold) 
             if nargin < 2 || isempty(threshold), threshold = 4; end
         
             dists   = obj.distributions;
@@ -153,46 +135,42 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
                         end
         
                         if d2 < best_d2
-                            best_d2 = d2; best_i = i; best_j = j; best_R = R; %#ok<NASGU>
+                            best_d2 = d2; best_i = i; best_j = j; best_R = R; 
                         end
                     end
                 end
         
                 if best_d2 < threshold
                     i = best_i; j = best_j;
-        
-                    % weights
+
                     wi = weights(i); wj = weights(j); W = wi + wj;
-        
-                    % last-state blocks
-                    mi = dists{i}.getLastState(); mj = dists{j}.getLastState();
-                    Pi = dists{i}.getLastCov();   Pj = dists{j}.getLastCov();
-        
-                    % moment-match last state's (m,P)
+
+                    mi = dists{i}.getLastState(); 
+                    mj = dists{j}.getLastState();
+                    Pi = dists{i}.getLastCov();   
+                    Pj = dists{j}.getLastCov();
+
                     m_new = (wi*mi + wj*mj) / W;
                     dmi   = mi - m_new; dmj = mj - m_new;
                     P_new = (wi*(Pi + dmi*dmi') + wj*(Pj + dmj*dmj')) / W;
                     P_new = 0.5*(P_new + P_new');
-        
-                    % choose base (keep heavier track's history & cross-covs)
+
                     if wi >= wj
                         keep = i; drop = j;
                     else
                         keep = j; drop = i;
                     end
-        
-                    % write back into base's last block
+
                     base = dists{keep};
-                    d    = base.state_dim;                 % assumed property
+                    d    = base.state_dim;
                     nTot = numel(base.means);
                     idxk = (nTot - d + 1) : nTot;
         
-                    base.means(idxk)         = m_new;
-                    Cfull                    = base.covariances;
-                    Cfull(idxk, idxk)        = P_new;
-                    base.covariances         = 0.5*(Cfull + Cfull');
+                    base.means(idxk) = m_new;
+                    Cfull = base.covariances;
+                    Cfull(idxk, idxk) = P_new;
+                    base.covariances = 0.5*(Cfull + Cfull');
         
-                    % update mixture
                     dists{keep}  = base;
                     weights(keep)= W;
                     dists(drop)  = [];

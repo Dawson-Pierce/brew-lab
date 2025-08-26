@@ -33,15 +33,13 @@ for k = 1:length(t)
 
     est = ekf.predict(dt,est); % Predict the next state
     [est,q] = ekf.correct(dt, meas, est); % Update the estimate with the new measurements
-
-    disp(q)
-
+    
     % Plotting
     scatter(meas_hst(1,:),meas_hst(2,:),'w*'); grid on; hold on
     xlim([-5 105])
     ylim([-5 105])
 
-    est.plot([1 2],'c','r-','lineWidth',2); hold off
+    est.plot([1 2],'c','r','lineWidth',2); hold off
 
     drawnow; 
 end
