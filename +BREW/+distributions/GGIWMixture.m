@@ -280,13 +280,13 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
                     V_new = 0.5 * (V_new + V_new.');
             
                     % append merged component
-                    w_lst(end+1) = w_new;                          %#ok<AGROW>
-                    m_lst{end+1} = m_new;                          %#ok<AGROW>
-                    P_lst{end+1} = P_new;                          %#ok<AGROW>
-                    a_lst{end+1} = a_new;                          %#ok<AGROW>
-                    b_lst{end+1} = b_new;                          %#ok<AGROW>
-                    v_lst{end+1} = v_new;                          %#ok<AGROW>
-                    V_lst{end+1} = V_new;                          %#ok<AGROW>
+                    w_lst(end+1) = w_new; 
+                    m_lst{end+1} = m_new; 
+                    P_lst{end+1} = P_new; 
+                    a_lst{end+1} = a_new; 
+                    b_lst{end+1} = b_new; 
+                    v_lst{end+1} = v_new; 
+                    V_lst{end+1} = V_new; 
             
                     % remove grouped comps from remaining set
                     remaining(grp) = false;
@@ -300,7 +300,7 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
                     'covariances', P_lst, ...
                     'IWdofs',      v_lst, ...
                     'IWshapes',    V_lst, ...
-                    'weights',     w_lst );
+                    'weights',     w_lst ); 
             end
 
 

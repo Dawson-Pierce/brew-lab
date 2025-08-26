@@ -80,14 +80,14 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
         end
         
         
-        function newObj = copy(obj)
-            % Deep copy of the object
-            new_means = obj.mean_trajectories;
-            new_covariances = obj.covariance_trajectories;
-            new_weights = obj.weights;
-            new_idx = obj.idx;
-            newObj = BREW.distributions.TrajectoryGaussianMixture(new_idx,new_means, new_covariances, new_weights);
-        end
+        % function newObj = copy(obj)
+        %     % Deep copy of the object
+        %     new_means = obj.mean_trajectories;
+        %     new_covariances = obj.covariance_trajectories;
+        %     new_weights = obj.weights;
+        %     new_idx = obj.idx;
+        %     newObj = BREW.distributions.TrajectoryGaussianMixture(new_idx,new_means, new_covariances, new_weights);
+        % end
 
         function measurements = sample_measurements(obj, xy_inds, idx, meas_cov)
 

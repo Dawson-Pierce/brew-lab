@@ -82,11 +82,13 @@ for k = 1:length(t)
     scatter3(measurements{k}(1,:),measurements{k}(2,:),measurements{k}(3,:),'w*','SizeData',0.5)
 
     % PHD stuff
-    phd.predict(dt,{}); % Predict the state of the PHD filter
+    phd.predict(dt,{}); % Predict the state of the PHD filter 
+
     phd.correct(dt,measurements{k}); % Update the PHD filter with the new measurements
 
-    fprintf("timestep: %f \n",t(k)) 
     est_mix = phd.cleanup();
+
+    fprintf("timestep: %f \n",t(k)) 
 
     est_mix.plot_distributions(ax,[1,2,3],0.95);
 

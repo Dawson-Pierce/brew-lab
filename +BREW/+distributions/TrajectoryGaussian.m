@@ -51,15 +51,21 @@ classdef TrajectoryGaussian < BREW.distributions.TrajectoryBaseModel
             parse(p, varargin{:});
 
             states = obj.RearrangeStates();
+
             if length(plt_inds) == 3
                 plot3(states(plt_inds(1),:), states(plt_inds(2),:), states(plt_inds(3),:), 'Color', p.Results.c,'LineStyle', p.Results.LineStyle, 'LineWidth', p.Results.LineWidth);
                 xlabel('X-axis');
                 ylabel('Y-axis');
                 zlabel('Z-axis');
-            else
+            elseif length(plt_inds) == 2
                 plot(p.Results.ax, states(plt_inds(1),:), states(plt_inds(2),:), 'Color', p.Results.c,'LineStyle', p.Results.LineStyle, 'LineWidth', p.Results.LineWidth);
                 xlabel('X-axis');
                 ylabel('Y-axis'); 
+            elseif isscalar(plt_inds) == 1
+                ind_valid = obj.init_idx+1:(obj.init_idx+obj.window_size);
+                plot(p.Results.ax, ind_valid, states(plt_inds,:), 'Color', p.Results.c,'LineStyle', p.Results.LineStyle, 'LineWidth', p.Results.LineWidth); 
+            else
+                disp("error plotting - please have plt_inds be a length in range of 1-3")
             end
         end
         
