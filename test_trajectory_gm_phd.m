@@ -63,11 +63,11 @@ for k = 1:length(t)
     phd.predict(dt,{}); 
 
     phd.correct(dt, meas); 
-
+    
     est_mix = phd.cleanup();
 
-    % Plotting
-    scatter(meas_hst(1,:),meas_hst(2,:), 8,'w*'); grid on; hold on 
+    % Plotting 
+    scatter(meas_hst(1,:),meas_hst(2,:), 8,'w*'); grid on; hold on
 
     % Plotting the non-extracted terms to illustrate pruned mixture / how
     % trajectory set theory RFS is doing its job

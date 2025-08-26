@@ -48,16 +48,16 @@ classdef ParallelPHD < BREW.multi_target.RFSBase
             obj.merge_threshold = p.Results.merge_threshold;
             obj.cluster_obj = p.Results.cluster_obj;
 
-            obj.Mix = obj.birth_model;
+            obj.Mix = obj.birth_model.copy();
             obj.extracted_mix = {};
 
         end
 
         function obj = predict(obj, dt, varargin) 
-
+            
             obj.predict_prob_density(dt,varargin);
 
-            obj.Mix.addComponents(obj.birth_model);
+            obj.Mix.addComponents(obj.birth_model.copy());
 
             for kk = 1:length(obj.birth_model)
                 if isa(obj.birth_model.distributions{kk},"BREW.distributions.TrajectoryBaseModel")
@@ -88,11 +88,11 @@ classdef ParallelPHD < BREW.multi_target.RFSBase
             % meas_new is a cell of all measurements
 
             % in the case that the target is not detected
-            undetected_mix = clone(obj.Mix);
+            undetected_mix = obj.Mix.copy(); 
             undetected_mix.weights = (1 - obj.prob_detection) * undetected_mix.weights;
 
             % Correct the mixture for each measurement
-            obj.correct_prob_density(dt, meas_new, obj.Mix, varargin);
+            obj.correct_prob_density(dt, meas_new, varargin);
 
             obj.Mix.addComponents(undetected_mix);
 
@@ -136,38 +136,56 @@ classdef ParallelPHD < BREW.multi_target.RFSBase
         end
 
 
-        function obj = correct_prob_density(obj, dt, meas, mix, varargin)
-            obj.Mix.weights = obj.prob_detection * mix.weights;
-            dist = {};
-            weights = [];
-            for z = 1:length(meas)
-                w_lst = []; 
-                for k = 1:length(mix)
-                    [dist{end+1},qz] = obj.filter_.correct(dt,meas{z},mix.distributions{k});
-                    w_lst(end+1) = qz * mix.weights(k);
-                end
-                weights = [weights, w_lst ./ (obj.clutter_rate * obj.clutter_density + sum(w_lst))];
-            end
+        function obj = correct_prob_density(obj, dt, meas, varargin)
+            Z  = numel(meas);
+            d_in = obj.Mix.distributions; 
+            K  = numel(d_in);
+            w0 = (obj.prob_detection * obj.Mix.weights); 
+            C  = obj.clutter_rate * obj.clutter_density; 
 
-            obj.Mix.distributions = dist;
-            obj.Mix.weights = weights;
+            dist_grid = cell(Z, K);
+            w_grid    = zeros(Z, K);
+            
+            parfor z = 1:Z
+                y   = meas{z}; 
+                dist_z = cell(1, K);
+                w_lst  = zeros(1, K); 
+                for k = 1:K
+                    [dist_z{k}, qz] = obj.filter_.correct(dt, y, d_in{k});
+                    w_lst(k) = qz * w0(k);
+                end 
+                w_lst = w_lst ./ (C + sum(w_lst)); 
+                dist_grid(z,:) = dist_z;
+                w_grid(z,:) = w_lst;
+            end
+            
+            obj.Mix.distributions = reshape(dist_grid.', 1, []); 
+            obj.Mix.weights = reshape(w_grid.',    1, []); 
         end
 
         function obj = predict_prob_density(obj,dt,varargin)
             % Predict the mixture probabilities
-
-            obj.Mix.weights = obj.Mix.weights * obj.prob_survive;
-
-            dists = obj.Mix.distributions;
-
-            parfor k = 1:length(mix) 
-                dists{k} = obj.filter_.predict(dt,obj.Mix.distributions{k});
+            new_weights = zeros(size(obj.Mix.weights));
+            new_distributions = cell(size(obj.Mix.distributions));
+        
+            parfor k = 1:length(obj.Mix)
+                new_weights(k) = obj.Mix.weights(k) * obj.prob_survive;
+                new_distributions{k} = obj.filter_.predict(dt, obj.Mix.distributions{k});
             end
-
-            obj.Mix.distributions = dists;
+        
+            % Now assign outside of parfor
+            obj.Mix.weights = new_weights;
+            obj.Mix.distributions = new_distributions;
 
         end
 
+        function spawn_mix = gen_spawned_targets(obj,mixture)
+            spawn_mix = mixture; % copy mixture, should be generalized for all mixtures
+            for k = 1:length(spawn_mix)
+                spawn_mix.covariances{k} = obj.spawn_cov; % all mixtures should have a covariance
+                spawn_mix.weights(k) = obj.spawn_weight; 
+            end
+        end
     end
 
 end
