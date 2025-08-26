@@ -1,4 +1,4 @@
-classdef BaseMixtureModel 
+classdef BaseMixtureModel < handle & matlab.mixin.Copyable
     % Generic base class for mixture distribution models.
     % Defines required functions and base attributes for the mixture model.
     
