@@ -30,7 +30,8 @@ ekf = BREW.filters.TrajectoryGaussianEKF( ...
     'dyn_obj',dyn, ...
     'process_noise',diag([0.1 0.1 0.1 0.05]), ...
     'H',[1 0 0 0; 0 1 0 0], ...
-    'measurement_noise', 0.05 * [1; 1]);
+    'measurement_noise', 0.05 * [1 0; 0 1], ...
+    'L',20);
 
 dt = 1;
 
@@ -63,7 +64,7 @@ for k = 1:length(t)
     phd.predict(dt,{}); 
 
     phd.correct(dt, meas); 
-    
+
     est_mix = phd.cleanup();
 
     % Plotting 
@@ -73,7 +74,7 @@ for k = 1:length(t)
     % trajectory set theory RFS is doing its job
     phd.Mix.plot([1 2],'colors','r','LineWidth',0.05,'LineStyle','--'); 
 
-    est_mix.plot([1 2],'LineWidth',2); hold off
+    est_mix.plot([1 2],'LineWidth',2,'window_color','r','window_width',2.5); hold off
 
     xlim([-20 120])
     ylim([-70 70])
