@@ -147,6 +147,31 @@ classdef GGIWEKF < BREW.filters.FiltersBase
             likelihood = exp(log_likelihood);
         
         end
+
+        function val = gate_meas(obj, pred_dist, z, gamma)
+            state = pred_dist.mean;
+            P = pred_dist.covariance;
+            
+            est_z = obj.estimate_measurement(state);
+
+            H = obj.getMeasurementMatrix();
+
+            R = obj.measurement_noise;
+
+            Sj = H * P * H' + R; 
+            Sj= (Sj+ Sj')/2; 
+
+            Vs = chol(Sj);  
+            inv_sqrt_Sj= inv(Vs);
+
+            iSj= inv_sqrt_Sj*inv_sqrt_Sj'; 
+
+            nu = z - est_z;
+
+            dist= nu' * iSj * nu;
+
+            val = dist < gamma;
+        end
     end 
 
 end

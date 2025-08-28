@@ -142,6 +142,31 @@ classdef TrajectoryGaussianEKF < BREW.filters.FiltersBase
             likelihood = mvnpdf(meas, est_meas, S);
         
         end
+
+        function val = gate_meas(obj, pred_dist, z, gamma)
+            state = pred_dist.getLastState();
+            P = pred_dist.getLastCov();
+            
+            est_z = obj.estimate_measurement(state);
+
+            H = obj.getMeasurementMatrix();
+
+            R = obj.measurement_noise;
+
+            Sj = H * P * H' + R; 
+            Sj= (Sj+ Sj')/2; 
+
+            Vs = chol(Sj); 
+            inv_sqrt_Sj= inv(Vs);
+
+            iSj= inv_sqrt_Sj*inv_sqrt_Sj'; 
+
+            nu = z - est_z;
+
+            dist= nu' * iSj * nu;
+
+            val = dist < gamma;
+        end
     end 
 
 end

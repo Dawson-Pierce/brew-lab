@@ -6,6 +6,7 @@ classdef PHD < BREW.multi_target.RFSBase
         max_terms
         merge_threshold
         extract_threshold
+        gate_threshold
         extracted_mix
         cluster_obj 
         Mix
@@ -29,6 +30,7 @@ classdef PHD < BREW.multi_target.RFSBase
             addParameter(p,'max_terms',100)
             addParameter(p,'extract_threshold',0.5)
             addParameter(p,'merge_threshold',4)
+            addParameter(p,'gate_threshold',9)
             addParameter(p,'cluster_obj',[])
 
             parse(p, varargin{:});
@@ -45,6 +47,7 @@ classdef PHD < BREW.multi_target.RFSBase
             obj.prune_threshold = p.Results.prune_threshold;
             obj.max_terms = p.Results.max_terms;
             obj.extract_threshold = p.Results.extract_threshold;
+            obj.gate_threshold = p.Results.gate_threshold;
             obj.merge_threshold = p.Results.merge_threshold;
             obj.cluster_obj = p.Results.cluster_obj;
 
@@ -98,16 +101,16 @@ classdef PHD < BREW.multi_target.RFSBase
 
         end
 
-        function extracted_dist = extract(obj)
+        function [obj,extracted_dist] = extract(obj)
             extracted_dist = obj.Mix.extract_mix(obj.extract_threshold);
-            obj.extracted_mix{end+1} = extracted_dist;
+            obj.extracted_mix{end+1} = extracted_dist.copy();
         end
 
-        function extracted_dist = cleanup(obj)
+        function [extracted_dist,obj] = cleanup(obj)
             obj.prune();
             obj.merge();
             obj.cap();
-            extracted_dist = obj.extract();
+            [obj,extracted_dist] = obj.extract();
         end 
     end
 
@@ -128,7 +131,7 @@ classdef PHD < BREW.multi_target.RFSBase
                 [~, idx] = sort(obj.Mix.weights, 'descend');
 
                 dist = obj.Mix.distributions(idx(1:obj.max_terms));
-                weights = obj.Mix.weights(idx(1:obj.max_terms)); % * w / (sum(obj.Mix.weights(idx(1:obj.max_terms))));
+                weights = obj.Mix.weights(idx(1:obj.max_terms)); 
 
                 obj.Mix.distributions = dist;
                 obj.Mix.weights = weights;
@@ -143,8 +146,16 @@ classdef PHD < BREW.multi_target.RFSBase
             for z = 1:length(meas)
                 w_lst = []; 
                 for k = 1:length(obj.Mix)
-                    [dist{end+1},qz] = obj.filter_.correct(dt,meas{z},obj.Mix.distributions{k});
-                    w_lst(end+1) = qz * obj.Mix.weights(k);
+                    if obj.Mix.isExtendedTarget
+                        % matrix of detections, mean needs to be taken for gating
+                        z_gate = mean(meas{z},2);
+                    else
+                        z_gate = meas{z};
+                    end
+                    if obj.filter_.gate_meas(obj.Mix.distributions{k}, z_gate, obj.gate_threshold)
+                        [dist{end+1},qz] = obj.filter_.correct(dt,meas{z},obj.Mix.distributions{k});
+                        w_lst(end+1) = qz * obj.Mix.weights(k);
+                    end
                 end
                 weights = [weights, w_lst ./ (obj.clutter_rate * obj.clutter_density + sum(w_lst))];
             end

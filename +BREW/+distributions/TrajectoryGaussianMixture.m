@@ -99,10 +99,10 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
             if nargin < 2 || isempty(threshold), threshold = 4; end
         
             dists   = obj.distributions;
-            weights = obj.weights(:).';
-            if isempty(weights), weights = ones(1, numel(dists)); end
+            weights = obj.weights(:).'; 
         
             keepMerging = true;
+
             while keepMerging && numel(dists) > 1
                 keepMerging = false;
                 N = numel(dists);
@@ -140,43 +140,58 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
                     end
                 end
         
-                if best_d2 < threshold
+                if best_d2 < threshold 
                     i = best_i; j = best_j;
-
+                    
+                    if isempty(weights)
+                        weights = ones(1, numel(dists));
+                    end
                     wi = weights(i); wj = weights(j); W = wi + wj;
 
-                    mi = dists{i}.getLastState(); 
+                    mi = dists{i}.getLastState();
                     mj = dists{j}.getLastState();
-                    Pi = dists{i}.getLastCov();   
-                    Pj = dists{j}.getLastCov();
-
-                    m_new = (wi*mi + wj*mj) / W;
-                    dmi   = mi - m_new; dmj = mj - m_new;
-                    P_new = (wi*(Pi + dmi*dmi') + wj*(Pj + dmj*dmj')) / W;
-                    P_new = 0.5*(P_new + P_new');
-
+                    Pi = 0.5*(dists{i}.getLastCov() + dists{i}.getLastCov()'); 
+                    Pj = 0.5*(dists{j}.getLastCov() + dists{j}.getLastCov()');
+                    
                     if wi >= wj
                         keep = i; drop = j;
+                        m_keep = mi; P_keep = Pi; m_other = mj; P_other = Pj;
                     else
                         keep = j; drop = i;
+                        m_keep = mj; P_keep = Pj; m_other = mi; P_other = Pi;
                     end
-
-                    base = dists{keep};
-                    d    = base.state_dim;
-                    nTot = numel(base.means);
-                    idxk = (nTot - d + 1) : nTot;
-        
+                    
+                    gamma_max = 0.2;
+                    gamma = min(min(wi,wj)/W, gamma_max);
+                    
+                    if gamma > 0
+                        dm = (m_other - m_keep);
+                        m_new = m_keep + gamma * dm;
+                    
+                        P_new = (1-gamma)*P_keep + gamma*P_other + gamma*(1-gamma)*(dm*dm');
+                        P_new = 0.5*(P_new + P_new');
+                    else
+                        m_new = m_keep;
+                        P_new = P_keep;
+                    end
+                    
+                    base  = dists{keep};
+                    d     = base.state_dim;
+                    nTot  = numel(base.means);
+                    idxk  = (nTot - d + 1) : nTot;
+                    
                     base.means(idxk) = m_new;
                     Cfull = base.covariances;
                     Cfull(idxk, idxk) = P_new;
                     base.covariances = 0.5*(Cfull + Cfull');
-        
-                    dists{keep}  = base;
-                    weights(keep)= W;
-                    dists(drop)  = [];
-                    weights(drop)= [];
-        
-                    keepMerging = true;
+                    
+                    dists{keep}   = base;
+                    weights(keep) = W;
+                    dists(drop)   = [];
+                    weights(drop) = [];
+                    
+                    keepMerging = true; 
+
                 end
             end
         
