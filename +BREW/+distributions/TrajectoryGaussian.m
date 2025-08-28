@@ -98,11 +98,15 @@ classdef TrajectoryGaussian < BREW.distributions.TrajectoryBaseModel
             elseif isscalar(plt_inds) == 1 
                 ind_valid = obj.init_idx+1:(obj.init_idx+obj.window_size);
                 plot(p.Results.ax, ind_valid, states(plt_inds,:), ...
-                    'Color', p.Results.window_color,'LineStyle', p.Results.window_style, 'LineWidth', p.Results.window_width); 
+                    'Color', p.Results.c,'LineStyle', p.Results.LineStyle, 'LineWidth', p.Results.LineWidth); 
 
                 if  plot_window
                     states_window = obj.RearrangeStates();
-                    ind_valid = obj.init_idx+1:(obj.init_idx+length(obj.means)/obj.state_dim);
+                    if (size(obj.mean_history,2) == size(states_window,2))
+                        ind_valid = obj.init_idx+1:(obj.init_idx+size(obj.mean_history,2));
+                    else
+                        ind_valid = (obj.init_idx+1)+(size(obj.mean_history,2) - size(states_window,2)):(obj.init_idx+size(obj.mean_history,2));
+                    end
                     plot(p.Results.ax, ind_valid, states_window(plt_inds,:), ...
                         'Color', p.Results.window_color,'LineStyle', p.Results.window_style, 'LineWidth', p.Results.window_width); 
                 end
