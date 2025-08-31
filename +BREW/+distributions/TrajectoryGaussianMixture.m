@@ -153,7 +153,10 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
                     Pi = 0.5*(dists{i}.getLastCov() + dists{i}.getLastCov()'); 
                     Pj = 0.5*(dists{j}.getLastCov() + dists{j}.getLastCov()');
                     
-                    if wi >= wj
+                    len_i = size(dists{i}.mean_history, 2);
+                    len_j = size(dists{j}.mean_history, 2);
+                    
+                    if len_i > len_j || (len_i == len_j && wi >= wj)
                         keep = i; drop = j;
                         m_keep = mi; P_keep = Pi; m_other = mj; P_other = Pj;
                     else
