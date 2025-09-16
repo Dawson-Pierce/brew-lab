@@ -35,18 +35,19 @@ measurements = {};
 H = [eye(3) zeros(3, length(means{1})-3)];
 R = 0.2 * eye(3); % Measurement noise
 process_noise = 0.01 * eye(length(means{1})); 
-inner_filter = BREW.filters.GGIWEKF('dyn_obj',target_motion, ...
-    'H',H,'process_noise',process_noise,'measurement_noise', R);
+inner_filter = BREW.filters.TrajectoryGGIWEKF('dyn_obj',target_motion, ...
+    'H',H,'process_noise',process_noise,'measurement_noise', R, 'L',20);
 
 alpha = {10};
 beta = {1}; 
 mean = {[0; 15; 10; 0; 0; 0]}; 
-covariance = {diag([5,5,5,2,2,2])}; 
+covariance = {diag([10,10,10,2,2,2])}; 
 IWdof = {10}; 
 IWshape = {[1 0 0; 0 1 0; 0 0 1]}; 
 weight = [1];
 
-birth_model = BREW.distributions.GGIWMixture( ...
+birth_model = BREW.distributions.TrajectoryGGIWMixture( ...
+    'idx', {1}, ...
     'alphas', alpha, ...
     'betas', beta, ...
     'means', mean, ...
@@ -69,7 +70,7 @@ view(3);
 
 axis(ax, [-10 10 0 20 0 20]);
 
-gifFilename = 'GGIW_PHD_3D.gif';
+gifFilename = 'TrajectoryGGIW_PHD_3D.gif';
 
 for k = 1:length(t)
     cla(ax);
@@ -90,7 +91,7 @@ for k = 1:length(t)
 
     fprintf("timestep: %f \n",t(k)) 
 
-    est_mix.plot_distributions([1,2,3]);
+    est_mix.plot_distributions([1,2,3],'window_color','r','window_width',1.6);
 
     drawnow;
 
