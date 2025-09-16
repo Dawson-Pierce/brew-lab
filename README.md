@@ -18,3 +18,8 @@ Trajectory Set Theory GM-PHD filter implemented as an alternative to labeled RFS
 You can see the L-scan window in red, and previous target trajectories in the other colors. The L-scan is performed as an efficient implementation of the trajectory set theory filters. 
 
 ![til](./gm-trajectory.gif)
+
+## Example 3: 
+Same test as Example 1, but with the TST-GGIW. Output of test_PHD_TrajectoryGGIW.m. 
+
+![til](./TrajectoryGGIW_PHD_3D.gif)
