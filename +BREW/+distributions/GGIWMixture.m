@@ -155,18 +155,20 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
             end
         end
         
-        function plot_distributions(obj, ax, plt_inds, h, colors)
-            % Plot all GGIW components in 2D (or 3D if plt_inds has 3 elements)
-            if nargin < 2 || isempty(ax),        ax = gca;       end
-            if nargin < 3 || isempty(plt_inds),   plt_inds = [1 2]; end
-            if nargin < 4 || isempty(h),          h = 0.95;      end
-        
+        function plot_distributions(obj, plt_inds, varargin) 
+
             n = numel(obj.distributions);
-        
-            % if no colors given, pull an n‐by‐3 list from lines
-            if nargin < 5 || isempty(colors)
-                colors = lines(n);
-            end
+
+            p = inputParser;
+            p.KeepUnmatched = true;
+            addParameter(p,'colors',lines(n))
+            addParameter(p,'h',0.95)
+            addParameter(p,'ax',gca)
+            parse(p, varargin{:});
+
+            colors = p.Results.colors;
+            h = p.Results.h;
+            ax = p.Results.ax;
         
             % if user passed a single color (char or 1×3), replicate it
             if (ischar(colors) && size(colors,1)==1) || (isnumeric(colors) && isequal(size(colors),[1,3]))

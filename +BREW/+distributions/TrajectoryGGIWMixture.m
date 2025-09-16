@@ -1,4 +1,4 @@
-classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
+classdef TrajectoryGGIWMixture < BREW.distributions.BaseMixtureModel
     % Trajectory Gaussian Mixture object.
     
     properties (Dependent)
@@ -7,16 +7,20 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
     end
 
     properties 
-        isExtendedTarget = 0;
+        isExtendedTarget = 1;
     end
     
     methods
-        function obj = TrajectoryGaussianMixture(varargin)
+        function obj = TrajectoryGGIWMixture(varargin)
             p = inputParser; 
             p.CaseSensitive = true;
             addParameter(p, 'dist_list', {});
+            addParameter(p, 'alphas', {});
+            addParameter(p, 'betas', {});
             addParameter(p, 'means', {});
             addParameter(p, 'covariances', {});
+            addParameter(p, 'IWdofs', {});
+            addParameter(p, 'IWshapes', {}); 
             addParameter(p, 'idx', {});
             addParameter(p,'weights',[]);
 
@@ -29,11 +33,32 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
                 dists = p.Results.dist_list;
             end
 
-            if ~isempty(p.Results.means) && ~isempty(p.Results.covariances) 
-                for i = 1:numel(p.Results.means)
-                    dists{end+1} = BREW.distributions.TrajectoryGaussian(p.Results.idx{i},p.Results.means{i}(:), p.Results.covariances{i});
-                end 
+            % if ~isempty(p.Results.means) && ~isempty(p.Results.covariances) 
+            %     for i = 1:numel(p.Results.means)
+            %         dists{end+1} = BREW.distributions.TrajectoryGaussian(p.Results.idx{i},p.Results.means{i}(:), p.Results.covariances{i});
+            %     end 
+            % end
+            if ~isempty(p.Results.idx) && ...
+               ~isempty(p.Results.alphas) && ...
+               ~isempty(p.Results.betas) && ...
+               ~isempty(p.Results.means) && ...
+               ~isempty(p.Results.covariances) && ...
+               ~isempty(p.Results.IWdofs) && ...
+               ~isempty(p.Results.IWshapes)
+           
+                N = numel(p.Results.alphas);  % Assume all parameter lists are the same length
+                for i = 1:N
+                    dists{end+1} = BREW.distributions.TrajectoryGGIW( ...
+                        p.Results.idx{i}, ...
+                        p.Results.alphas{i}, ...
+                        p.Results.betas{i}, ...
+                        p.Results.means{i}(:), ...
+                        p.Results.covariances{i}, ...
+                        p.Results.IWdofs{i}, ...
+                        p.Results.IWshapes{i});
+                end
             end
+
             obj@BREW.distributions.BaseMixtureModel(dists, p.Results.weights);
         end
 
@@ -60,7 +85,7 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
 
             p = inputParser;
             p.KeepUnmatched = true;
-            addParameter(p,'colors',lines(n))
+            addParameter(p,'colors',lines(n)) 
             parse(p, varargin{:}); 
 
             colors = p.Results.colors;
@@ -77,23 +102,23 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
             end 
         end
         
-        function measurements = sample_measurements(obj, xy_inds, idx, meas_cov)
-
-            if isempty(idx)
-                idx = 0;
-                disp("for proper sampling of trajectory object, insert index for measurement timestep")
-            end
-
-            all_meas = []; 
-            for i = 1:numel(obj.distributions)
-                if obj.distributions{i}.init_idx <= idx
-                    mi = obj.distributions{i}.sample_measurements(xy_inds, meas_cov);
-                    all_meas = [all_meas, mi];  
-                end
-            end
-        
-            measurements = all_meas;  
-        end
+        % function measurements = sample_measurements(obj, xy_inds, idx, meas_cov)
+        % 
+        %     if isempty(idx)
+        %         idx = 0;
+        %         disp("for proper sampling of trajectory object, insert index for measurement timestep")
+        %     end
+        % 
+        %     all_meas = []; 
+        %     for i = 1:numel(obj.distributions)
+        %         if obj.distributions{i}.init_idx <= idx
+        %             mi = obj.distributions{i}.sample_measurements(xy_inds, meas_cov);
+        %             all_meas = [all_meas, mi];  
+        %         end
+        %     end
+        % 
+        %     measurements = all_meas;  
+        % end
 
         function obj = merge(obj, threshold) 
             if nargin < 2 || isempty(threshold), threshold = 4; end
@@ -201,7 +226,6 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
 
                 end
             end
-
            
             obj.distributions = dists;
             obj.weights       = weights;
