@@ -193,28 +193,14 @@ classdef TrajectoryGGIWMixture < BREW.distributions.BaseMixtureModel
                         m_keep = mj; P_keep = Pj; m_other = mi; P_other = Pi;
                     end
 
-                    gamma_max = 0.2;
-                    gamma = min(min(wi,wj)/W, gamma_max);
-
-                    if gamma > 0
-                        dm = (m_other - m_keep);
-                        m_new = m_keep + gamma * dm;
-
-                        P_new = (1-gamma)*P_keep + gamma*P_other + gamma*(1-gamma)*(dm*dm');
-                        P_new = 0.5*(P_new + P_new');
-                    else
-                        m_new = m_keep;
-                        P_new = P_keep;
-                    end
-
                     base  = dists{keep};
                     d     = base.state_dim;
                     nTot  = numel(base.means);
                     idxk  = (nTot - d + 1) : nTot;
 
-                    base.means(idxk) = m_new;
+                    base.means(idxk) = m_keep;
                     Cfull = base.covariances;
-                    Cfull(idxk, idxk) = P_new;
+                    Cfull(idxk, idxk) = P_keep;
                     base.covariances = 0.5*(Cfull + Cfull');
 
                     dists{keep}   = base;
