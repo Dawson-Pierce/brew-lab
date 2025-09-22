@@ -49,6 +49,11 @@ meas_hst = [];
 
 meas_cov = diag([0.05, 0.05]);
 
+max_meas = 60;
+
+x_bound = [-20 120];
+y_bound = [-70 70];
+
 for k = 1:length(t)
     
     for ii = 1:length(truth)
@@ -57,7 +62,16 @@ for k = 1:length(t)
         end
     end
 
+
+    num_noise_meas = round(max_meas * rand(1));
+    x_noise = rand(1,num_noise_meas) * (x_bound(2) - x_bound(1)) + x_bound(1);
+    y_noise = rand(1,num_noise_meas) * (y_bound(2) - y_bound(1)) + y_bound(1);
+
+    noisy_meas = [x_noise; y_noise];
+
     meas = truth.sample_measurements([1,2], k, meas_cov);
+
+    meas = [meas, noisy_meas];
 
     meas_hst = [meas_hst, meas];
 
@@ -68,12 +82,12 @@ for k = 1:length(t)
     est_mix = phd.cleanup();
 
     % Plotting 
-    scatter(meas_hst(1,:),meas_hst(2,:), 8,'w*'); grid on; hold on
+    scatter(meas(1,:),meas(2,:), 8,'w*'); grid on; hold on
 
     est_mix.plot_distributions([1 2],'LineWidth',2,'window_color','r','window_width',2.5); hold off
 
-    xlim([-20 120])
-    ylim([-70 70])
+    xlim(x_bound)
+    ylim(y_bound)
 
     drawnow; 
 
