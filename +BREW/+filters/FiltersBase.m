@@ -1,4 +1,4 @@
-classdef (Abstract) FiltersBase < handle
+classdef (Abstract) FiltersBase < handle & matlab.mixin.Copyable
     % FiltersBase class
     %
     % Defines all common functions and properties for each filter

@@ -1,4 +1,4 @@
-classdef (Abstract) RFSBase < handle
+classdef (Abstract) RFSBase < handle & matlab.mixin.Copyable
     % FiltersBase class
     %
     % Defines all common functions and properties for each filter

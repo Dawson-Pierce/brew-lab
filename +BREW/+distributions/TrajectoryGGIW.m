@@ -114,9 +114,9 @@ classdef TrajectoryGGIW < BREW.distributions.TrajectoryBaseModel
                 Zc = reshape(ellipsoid_pts_conf(3,:), size(z));
                 surf(ax, real(Xc), real(Yc), real(Zc), 'FaceAlpha', 0.15, 'EdgeColor', p.Results.c,'EdgeAlpha',0.3, 'LineStyle', '--', 'FaceColor', p.Results.c, 'DisplayName', sprintf('%3.2f%% confidence interval',h*100));
                 
-                xlabel('X-axis');
-                ylabel('Y-axis');
-                zlabel('Z-axis');
+                % xlabel('X-axis');
+                % ylabel('Y-axis');
+                % zlabel('Z-axis');
 
             elseif length(plt_inds) == 2 
                 plot(p.Results.ax, states(plt_inds(1),:), states(plt_inds(2),:), ...
@@ -141,8 +141,8 @@ classdef TrajectoryGGIW < BREW.distributions.TrajectoryBaseModel
                 ellipse = Evec*[a*cos(t); b*sin(t)] + mu2; 
                 plot(ax, ellipse(1,:), ellipse(2,:), '-', 'Color', p.Results.c, 'DisplayName', "mean extent");
                 
-                xlabel('X-axis');
-                ylabel('Y-axis'); 
+                % xlabel('X-axis');
+                % ylabel('Y-axis'); 
                 
             else
                 disp("error plotting - please have plt_inds be a length of 2 or 3")
