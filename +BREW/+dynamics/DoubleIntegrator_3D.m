@@ -7,7 +7,7 @@ classdef DoubleIntegrator_3D < BREW.dynamics.DynamicsBase
             p = inputParser;
             p.CaseSensitive = true;
 
-            addParameter(p, 'u', 0); 
+            addParameter(p, 'u', zeros(3,1)); 
 
             parse(p, varargin{:});
 
