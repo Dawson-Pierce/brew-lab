@@ -102,7 +102,8 @@ classdef PHD < BREW.multi_target.RFSBase
         end
 
         function [obj,extracted_dist] = extract(obj)
-            extracted_dist = obj.Mix.extract_mix(obj.extract_threshold);
+            extracted_dist = obj.Mix.copy();
+            extracted_dist.extract_mix(obj.extract_threshold);
             obj.extracted_mix{end+1} = extracted_dist.copy();
         end
 
