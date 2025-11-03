@@ -12,8 +12,8 @@ target = BREW.distributions.Gaussian(mean,cov);
 
 dyn = BREW.dynamics.Integrator_2D();
 
-multi_mean = cat(3,[0; 0; 1; 1/2],[0; -20; 1; 1/2],[0; 20; 1; 1/2]);
-multi_cov = cat(3,diag([0.001, 0.1, 0.01, 0.01]),diag([0.001, 0.1, 0.01, 0.01]),diag([0.001, 0.1, 0.01, 0.01]));
+multi_mean = gpuArray(cat(3,[0; 0; 1; 1/2],[0; -20; 1; 1/2],[0; 20; 1; 1/2]));
+multi_cov = gpuArray(cat(3,diag([0.001, 0.1, 0.01, 0.01]),diag([0.001, 0.1, 0.01, 0.01]),diag([0.001, 0.1, 0.01, 0.01])));
 
 est = BREW.distributions.TrajectoryGaussianMixture('means',multi_mean,'covariances',multi_cov,'L_max',5); 
 
@@ -28,6 +28,8 @@ t = 0:dt:100;
 
 meas_hst = [];
 
+q_hist = zeros(3,length(t));
+
 for k = 1:length(t) 
     target.mean = dyn.propagateState(dt,target.mean);
     meas = target.sample_measurements([1 2]);
@@ -37,16 +39,20 @@ for k = 1:length(t)
     est = ekf.predict(dt,est); % Predict the next state
     [est,q] = ekf.correct(dt, meas, est); % Update the estimate with the new measurements 
 
-    q
+    q_hist(:,k) = q / sum(q);  
 
     cla
     
     % Plotting
+    subplot(2,1,1)
     scatter(meas_hst(1,:),meas_hst(2,:),'w*'); grid on; 
     xlim([-5 105])
     ylim([-5 105])
 
     est.plot_distributions([1 2],'window_style','--');  
+
+    subplot(2,1,2)
+    plot(q_hist(:,1:k)'); grid on; hold off
 
     drawnow; 
 end

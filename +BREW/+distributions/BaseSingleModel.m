@@ -1,4 +1,4 @@
-classdef BaseSingleModel < matlab.mixin.Copyable
+classdef BaseSingleModel 
     % Generic base class for distribution models.
     % Defines required functions and base attributes for the distribution.
     

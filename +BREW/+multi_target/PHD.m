@@ -22,8 +22,8 @@ classdef PHD < BREW.multi_target.RFSBase
             addParameter(p, 'birth_model', []); 
             addParameter(p, 'prob_detection', 1);
             addParameter(p, 'prob_survive', 1);
-            addParameter(p, 'clutter_rate', 0.001);
-            addParameter(p, 'clutter_density', 0.001);
+            addParameter(p, 'clutter_rate', 0.00001);
+            addParameter(p, 'clutter_density', 0.00001);
 
             % These are PHD specific
             addParameter(p,'prune_threshold',0.0001)
@@ -105,8 +105,9 @@ classdef PHD < BREW.multi_target.RFSBase
 
         end
 
-        function [obj,extracted_dist] = extract(obj)
-            extracted_dist = obj.Mix.extract_mix(obj.extract_threshold);
+        function extracted_dist = extract(obj)
+            extracted_dist = obj.Mix.copy();
+            extracted_dist.extract_mix(obj.extract_threshold);
             obj.extracted_mix{end+1} = extracted_dist.copy();
         end
 
@@ -114,7 +115,7 @@ classdef PHD < BREW.multi_target.RFSBase
             obj.prune();
             obj.merge();
             obj.cap();
-            [obj,extracted_dist] = obj.extract();
+            extracted_dist = obj.extract();
         end 
     end
 
@@ -138,7 +139,7 @@ classdef PHD < BREW.multi_target.RFSBase
                 weights = obj.Mix.weights(idx(1:obj.max_terms)); 
 
                 obj.Mix.distributions = dist;
-                obj.Mix.weights = weights;
+                obj.Mix.weights = weights * w/sum(weights);
             end
         end
 
@@ -151,8 +152,8 @@ classdef PHD < BREW.multi_target.RFSBase
 
             for z = 1:numel(meas)
                 [temp_mix, qz] = obj.filter_.correct(dt, meas{z}, obj.Mix.copy()); 
-                w_temp = det_weights .* qz; 
-                w_temp = w_temp ./ (obj.clutter_density*obj.clutter_rate + sum(w_temp));
+                w_temp = det_weights .* qz;
+                w_temp = w_temp ./ (obj.clutter_density + obj.clutter_rate + sum(w_temp));
 
                 temp_mix.weights = w_temp;
                 new_mix.addComponents(temp_mix); 

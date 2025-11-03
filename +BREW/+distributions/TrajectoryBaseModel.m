@@ -1,4 +1,4 @@
-classdef TrajectoryBaseModel < matlab.mixin.Copyable
+classdef TrajectoryBaseModel 
     % Trajectory Base Model for trajectory filters
     % Useful as an alternative to labeled RFS
 

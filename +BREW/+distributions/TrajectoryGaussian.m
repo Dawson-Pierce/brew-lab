@@ -2,11 +2,11 @@ classdef TrajectoryGaussian < BREW.distributions.TrajectoryBaseModel
     % Represents a Gaussian distribution object.
     
     properties
-        mean         % last time step mean (for acceleration in forward propagation)
+        mean         % last time step mean (for acceleration in forward propagation) 
+        covariance   % last time step covariance
         means        % trajectory history based on L-scan window
         covariances  % Matrix of covariances based on L-scan window
-        mean_history % trajectory history (includes outside L-scan)
-        % cov_history  % 3D Matrix of covariances per mean, doesn't have cross terms
+        mean_history % trajectory history (includes outside L-scan) 
         L_max 
     end
     
@@ -25,6 +25,7 @@ classdef TrajectoryGaussian < BREW.distributions.TrajectoryBaseModel
             obj.means = meanVal;
             obj.mean_history = meanVal; 
             obj.covariances = covVal; 
+            obj.covariance = covVal; 
             obj.L_max = p.Results.L_max;
 
         end 

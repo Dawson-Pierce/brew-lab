@@ -4,8 +4,6 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
     properties (Dependent)
         mean % Property to get matrix of means for speedy propagation
         idx % list of indices (important for RFS since birth model needs to change idx)
-        means % Cell of trajectory means
-        covariances % Cell of trajectory covariances
         L % list of lengths for each distribution 
         state_dim 
     end
@@ -14,6 +12,7 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
         isExtendedTarget = 0;
         isTrajectory = 1;
         L_max
+        means 
     end
     
     methods
@@ -93,6 +92,8 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
             arr = find(idx); 
             for i = 1:numel(arr)
                 obj.distributions(arr(i)).covariances = val(:,:,i);
+                nx = obj.distributions(arr(i)).state_dim;
+                obj.distributions(arr(i)).covariance = val(end-nx+1:end,end-nx+1:end,i);
             end
         end
 
@@ -175,100 +176,93 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
             if nargin < 2 || isempty(threshold), threshold = 4; end
         
             dists   = obj.distributions;
-            weights = obj.weights(:).'; 
-
+            weights = obj.weights(:).';
+            if isempty(weights)
+                weights = ones(1, numel(dists));
+            end
+        
             keepMerging = true;
-
+        
             while keepMerging && numel(dists) > 1
                 keepMerging = false;
                 N = numel(dists);
-
-                % ---- find closest pair by last-state Mahalanobis^2 ----
-                best_d2 = inf; best_i = 0; best_j = 0; 
+        
+                best_d2 = inf;
+                best_i = 0;
+                best_j = 0;
+        
+                % ---- Find closest pair ----
                 for i = 1:N
-                    mi = dists(i).means;
-                    Pi = dists(i).covariances; Pi = 0.5*(Pi+Pi');
+                    mi = dists(i).mean;
+                    Pi = dists(i).getLastCov();
+                    Pi = 0.5*(Pi + Pi'); % ensure symmetric
+        
                     for j = i+1:N
-                        mj = dists(i).means;
-                        Pj = dists(i).covariances; Pj = 0.5*(Pj+Pj');
-                        
-                        if size(mi) == size(mj) % Checks if lengths are the same, since we're absorbing trajectories and L-scan implementations should handle this 
-                            C = 0.5*(Pi + Pj); C = 0.5*(C + C');
+                        mj = dists(j).mean;
+                        Pj = dists(j).getLastCov();
+                        Pj = 0.5*(Pj + Pj');
+        
+                        % only merge if trajectory lengths are equal
+                        if numel(mi) == numel(mj)
+                            C = 0.5 * (Pi + Pj);
+                            C = 0.5 * (C + C');
+        
+                            % compute Mahalanobis distance safely
                             [R,p] = chol(C);
                             if p ~= 0
                                 epsj = 1e-9 * max(1, trace(C)/size(C,1));
                                 [R,p] = chol(C + epsj*eye(size(C)));
                                 if p ~= 0
-                                    % fallback to pinv
                                     invC = pinv(C);
-                                    d2 = (mi-mj)' * invC * (mi-mj);
+                                    d2 = (mi - mj)' * invC * (mi - mj);
                                 else
-                                    y  = R \ (mi - mj);
+                                    y = R \ (mi - mj);
                                     d2 = y' * y;
                                 end
                             else
-                                y  = R \ (mi - mj);
+                                y = R \ (mi - mj);
                                 d2 = y' * y;
                             end
                         else
                             d2 = inf;
-                        end 
-
+                        end
+        
                         if d2 < best_d2
-                            best_d2 = d2; best_i = i; best_j = j; 
+                            best_d2 = d2;
+                            best_i = i;
+                            best_j = j;
                         end
                     end
                 end
-
-                if best_d2 < threshold 
-                    i = best_i; j = best_j;
-
-                    if isempty(weights)
-                        weights = ones(1, numel(dists));
-                    end
-                    wi = weights(i); wj = weights(j); W = wi + wj;
-
-                    mi = dists(i).mean;
-                    mj = dists(j).mean;
-                    Pi = 0.5*(dists(i).getLastCov() + dists(i).getLastCov()'); 
-                    Pj = 0.5*(dists(j).getLastCov() + dists(j).getLastCov()');
-
-                    len_i = size(dists(i).mean_history, 2);
-                    len_j = size(dists(j).mean_history, 2);
-
-                    if len_i > len_j || (len_i == len_j && wi >= wj)
+        
+                % ---- Absorb if within threshold ----
+                if best_d2 < threshold
+                    i = best_i;
+                    j = best_j;
+        
+                    wi = weights(i);
+                    wj = weights(j);
+        
+                    if wi >= wj
                         keep = i; drop = j;
-                        m_keep = mi; P_keep = Pi; m_other = mj; P_other = Pj;
                     else
                         keep = j; drop = i;
-                        m_keep = mj; P_keep = Pj; m_other = mi; P_other = Pi;
                     end
-
-                    base  = dists(keep);
-                    d     = base.state_dim;
-                    nTot  = numel(base.means);
-                    idxk  = (nTot - d + 1) : nTot;
-
-                    base.means(idxk) = m_keep;
-                    Cfull = base.covariances;
-                    Cfull(idxk, idxk) = P_keep;
-                    base.covariances = 0.5*(Cfull + Cfull');
-
-                    dists(keep)   = base;
-                    weights(keep) = W;
-                    dists(drop)   = [];
+        
+                    % absorb weights
+                    weights(keep) = weights(keep) + weights(drop);
+        
+                    % keep distribution mean/covariance unchanged
+                    dists(drop) = [];
                     weights(drop) = [];
-
-                    keepMerging = true; 
-
+        
+                    keepMerging = true;
                 end
             end
-
-           
+        
             obj.distributions = dists;
-            obj.weights       = weights;
+            obj.weights = weights;
         end
-
 
         function disp(obj)
             % Display method for the Gaussian Mixture

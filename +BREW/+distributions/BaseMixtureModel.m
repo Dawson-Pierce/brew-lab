@@ -64,12 +64,15 @@ classdef BaseMixtureModel < handle & matlab.mixin.Copyable
         end
 
         function obj = addComponents(obj, mix)
-            % Add new components to the mixture
-            % Each argument is a cell array (except new_weights, which is numeric)
+            % Add new components to the mixture 
+            % new_dists = repmat(obj.distributions.empty, 1, length(obj.distributions)+length(mix));
+            % new_dists(1:length(obj.distributions)) = obj.distributions;
             for i = 1:length(mix)
-                obj.distributions(end+1) = mix.distributions(i);
+                % new_dists(length(obj.distributions)+i) = mix.distributions(i);
+                obj.distributions(end+1) = mix.distributions(i); 
                 obj.weights(end+1) = mix.weights(i);
             end
+            % obj.distributions = new_dists;
         end
 
         function obj = merge(obj,threshold)

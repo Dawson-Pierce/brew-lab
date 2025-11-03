@@ -92,12 +92,14 @@ classdef TrajectoryGaussianEKF < BREW.filters.FiltersBase
             p.KeepUnmatched = true;
             addParameter(p,'H',[]); 
             addParameter(p,'h',[]); 
-            addParameter(p,'meas_noise',obj.measurement_noise); 
+            addParameter(p,'meas_noise',obj.measurement_noise);
+            addParameter(p,'gate',4); 
             parse(p, varargin{:});
         
             h_input = p.Results.h;
             H_input = p.Results.H;
             meas_noise = p.Results.meas_noise;
+            gate = p.Results.gate;
         
             prevMean = dist.mean; 
             nx = size(prevMean,1);            
@@ -121,8 +123,7 @@ classdef TrajectoryGaussianEKF < BREW.filters.FiltersBase
             L = dist.L;
             uniqueL = unique(L);
 
-            likelihood = zeros(1,size(prevMean,3),'like',prevMean); 
-            counter = 1;
+            likelihood = nan(1,size(prevMean,3),'like',prevMean);
         
             for j = 1:numel(uniqueL)
 
@@ -137,24 +138,30 @@ classdef TrajectoryGaussianEKF < BREW.filters.FiltersBase
 
                 PHt = pagemtimes(P, permute(H_dot,[2 1 3]));
                 S   = pagemtimes(H_dot, PHt) + meas_noise;
+                S_inv = pageinv(S);
 
                 est_measurements = est_meas(:,:,curr_idx);
 
-                K   = pagemtimes(PHt, pageinv(S));
-
                 eps = meas - est_measurements;
+
+                K   = pagemtimes(PHt, S_inv);
+
                 Xnew = means + pagemtimes(K, eps);
-                
+
                 KH = pagemtimes(K, H_dot);
                 Pnew = P - pagemtimes(KH, P);
 
                 dist.SetMeans(Xnew,curr_idx);
                 dist.SetCovs(Pnew,curr_idx); 
 
+                counter = 1;
+                likelihood_temp = zeros(1,size(S,3));
                 for k = 1:size(S,3)
-                    likelihood(counter) = mvnpdf(meas', est_measurements(:,:,k)', S(:,:,k));
+                    likelihood_temp(counter) = mvnpdf(meas', est_measurements(:,:,k)', S(:,:,k));
                     counter = counter + 1;
                 end
+
+                likelihood(curr_idx) = likelihood_temp;
             end
         
         end
