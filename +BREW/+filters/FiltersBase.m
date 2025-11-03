@@ -96,8 +96,8 @@ classdef (Abstract) FiltersBase < handle & matlab.mixin.Copyable
         function measurement = estimate_measurement(obj,state)
             if ~isempty(obj.h)
                 measurement = obj.h(state);
-            elseif ~isempty(obj.H)
-                measurement = obj.getMeasurementMatrix(state) * state;
+            elseif ~isempty(obj.H) 
+                measurement = pagemtimes(obj.getMeasurementMatrix(state),state);
             end
         end
 
@@ -107,6 +107,8 @@ classdef (Abstract) FiltersBase < handle & matlab.mixin.Copyable
             else
                 measurementMatrix = obj.H;
             end
+
+            measurementMatrix = repmat(measurementMatrix,1,1,size(state,3));
         end
     end
 

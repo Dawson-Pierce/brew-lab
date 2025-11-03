@@ -12,9 +12,12 @@ target = BREW.distributions.Gaussian(mean,cov);
 
 dyn = BREW.dynamics.Integrator_2D();
 
-est = BREW.distributions.TrajectoryGaussian(1,target.sample(),cov); % Randomize mean initialization
+multi_mean = cat(3,[0; 0; 1; 1/2],[0; -20; 1; 1/2],[0; 20; 1; 1/2]);
+multi_cov = cat(3,diag([0.001, 0.1, 0.01, 0.01]),diag([0.001, 0.1, 0.01, 0.01]),diag([0.001, 0.1, 0.01, 0.01]));
 
-ekf = BREW.filters.TrajectoryGaussianEKF('dyn_obj',dyn,'process_noise',0.1 * eye(4),'H',[1 0 0 0; 0 1 0 0], 'measurement_noise', 5 * [1; 1]);
+est = BREW.distributions.TrajectoryGaussianMixture('means',multi_mean,'covariances',multi_cov,'L_max',5); 
+
+ekf = BREW.filters.TrajectoryGaussianEKF('dyn_obj',dyn,'process_noise',0.1 * eye(4),'H',[1 0 0 0; 0 1 0 0], 'measurement_noise', 1 * [1; 1]);
 
 dt = 1;
 
@@ -25,21 +28,25 @@ t = 0:dt:100;
 
 meas_hst = [];
 
-for k = 1:length(t)
+for k = 1:length(t) 
     target.mean = dyn.propagateState(dt,target.mean);
     meas = target.sample_measurements([1 2]);
 
     meas_hst = [meas_hst, meas];
 
     est = ekf.predict(dt,est); % Predict the next state
-    [est,q] = ekf.correct(dt, meas, est); % Update the estimate with the new measurements
+    [est,q] = ekf.correct(dt, meas, est); % Update the estimate with the new measurements 
+
+    q
+
+    cla
     
     % Plotting
-    scatter(meas_hst(1,:),meas_hst(2,:),'w*'); grid on; hold on
+    scatter(meas_hst(1,:),meas_hst(2,:),'w*'); grid on; 
     xlim([-5 105])
     ylim([-5 105])
 
-    est.plot([1 2],'c','r','lineWidth',2); hold off
+    est.plot_distributions([1 2],'window_style','--');  
 
     drawnow; 
 end

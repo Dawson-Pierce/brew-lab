@@ -3,7 +3,7 @@ classdef BaseMixtureModel < handle & matlab.mixin.Copyable
     % Defines required functions and base attributes for the mixture model.
     
     properties
-        distributions = {}  % Cell array of BaseSingleModel objects
+        distributions = []  % Array of BaseSingleModel objects
         weights = []        % Array of weights 
     end
     
@@ -67,7 +67,7 @@ classdef BaseMixtureModel < handle & matlab.mixin.Copyable
             % Add new components to the mixture
             % Each argument is a cell array (except new_weights, which is numeric)
             for i = 1:length(mix)
-                obj.distributions{end+1} = mix.distributions{i};
+                obj.distributions(end+1) = mix.distributions(i);
                 obj.weights(end+1) = mix.weights(i);
             end
         end
@@ -77,4 +77,5 @@ classdef BaseMixtureModel < handle & matlab.mixin.Copyable
             % This function should be overwritten
         end
     end
+
 end 

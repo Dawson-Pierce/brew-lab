@@ -22,8 +22,8 @@ classdef PHD < BREW.multi_target.RFSBase
             addParameter(p, 'birth_model', []); 
             addParameter(p, 'prob_detection', 1);
             addParameter(p, 'prob_survive', 1);
-            addParameter(p, 'clutter_rate', 0);
-            addParameter(p, 'clutter_density', 0);
+            addParameter(p, 'clutter_rate', 0.001);
+            addParameter(p, 'clutter_density', 0.001);
 
             % These are PHD specific
             addParameter(p,'prune_threshold',0.0001)
@@ -62,12 +62,16 @@ classdef PHD < BREW.multi_target.RFSBase
 
             obj.Mix.addComponents(obj.birth_model.copy());
 
-            for kk = 1:length(obj.birth_model)
-                if isa(obj.birth_model.distributions{kk},"BREW.distributions.TrajectoryBaseModel")
-                    prev = obj.birth_model.distributions{kk}.init_idx;
-                    obj.birth_model.distributions{kk}.init_idx = prev + 1;
-                end
-            end
+            if obj.birth_model.isTrajectory
+                obj.birth_model.idx = obj.birth_model.idx + 1;
+            end 
+
+            % for kk = 1:length(obj.birth_model)
+            %     if isa(obj.birth_model.distributions{kk},"BREW.distributions.TrajectoryBaseModel")
+            %         prev = obj.birth_model.distributions{kk}.init_idx;
+            %         obj.birth_model.distributions{kk}.init_idx = prev + 1;
+            %     end
+            % end
 
         end
 
@@ -92,7 +96,7 @@ classdef PHD < BREW.multi_target.RFSBase
 
             % in the case that the target is not detected
             undetected_mix = obj.Mix.copy(); 
-            undetected_mix.weights = (1 - obj.prob_detection) * undetected_mix.weights;
+            undetected_mix.weights = (1 - obj.prob_detection) * undetected_mix.weights; 
 
             % Correct the mixture for each measurement
             obj.correct_prob_density(dt, meas_new, varargin);
@@ -138,39 +142,31 @@ classdef PHD < BREW.multi_target.RFSBase
             end
         end
 
-
         function obj = correct_prob_density(obj, dt, meas, varargin)
-            obj.Mix.weights = obj.prob_detection * obj.Mix.weights;
-            dist = {};
-            weights = [];
-            for z = 1:length(meas)
-                w_lst = []; 
-                for k = 1:length(obj.Mix)
-                    if obj.Mix.isExtendedTarget
-                        % matrix of detections, mean needs to be taken for gating
-                        z_gate = mean(meas{z},2);
-                    else
-                        z_gate = meas{z};
-                    end
-                    if obj.filter_.gate_meas(obj.Mix.distributions{k}, z_gate, obj.gate_threshold)
-                        [dist{end+1},qz] = obj.filter_.correct(dt,meas{z},obj.Mix.distributions{k});
-                        w_lst(end+1) = qz * obj.Mix.weights(k);
-                    end
-                end
-                weights = [weights, w_lst ./ (obj.clutter_rate * obj.clutter_density + sum(w_lst))];
+            det_weights = obj.prob_detection * obj.Mix.weights;
+
+            new_mix = obj.Mix.copy();
+            new_mix.distributions = obj.Mix.distributions([]);  % empty of same type
+            new_mix.weights = zeros(0, 1, 'like', obj.Mix.weights);
+
+            for z = 1:numel(meas)
+                [temp_mix, qz] = obj.filter_.correct(dt, meas{z}, obj.Mix.copy()); 
+                w_temp = det_weights .* qz; 
+                w_temp = w_temp ./ (obj.clutter_density*obj.clutter_rate + sum(w_temp));
+
+                temp_mix.weights = w_temp;
+                new_mix.addComponents(temp_mix); 
             end
 
-            obj.Mix.distributions = dist;
-            obj.Mix.weights = weights;
+            obj.Mix = new_mix; 
+        
         end
+
 
         function obj = predict_prob_density(obj,dt,varargin)
             % Predict the mixture probabilities
-            for k = 1:length(obj.Mix)
-                obj.Mix.weights(k) = obj.Mix.weights(k) * obj.prob_survive;  
-                obj.Mix.distributions{k} = obj.filter_.predict(dt,obj.Mix.distributions{k});
-            end
-
+            obj.Mix.weights = obj.Mix.weights * obj.prob_survive;  
+            obj.Mix = obj.filter_.predict(dt,obj.Mix);
         end
 
         function spawn_mix = gen_spawned_targets(obj,mixture)

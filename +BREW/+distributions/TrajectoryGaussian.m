@@ -1,11 +1,13 @@
 classdef TrajectoryGaussian < BREW.distributions.TrajectoryBaseModel
     % Represents a Gaussian distribution object.
     
-    properties 
+    properties
+        mean         % last time step mean (for acceleration in forward propagation)
         means        % trajectory history based on L-scan window
         covariances  % Matrix of covariances based on L-scan window
         mean_history % trajectory history (includes outside L-scan)
-        cov_history  % 3D Matrix of covariances per mean, doesn't have cross terms
+        % cov_history  % 3D Matrix of covariances per mean, doesn't have cross terms
+        L_max 
     end
     
     methods
@@ -13,21 +15,27 @@ classdef TrajectoryGaussian < BREW.distributions.TrajectoryBaseModel
 
             p = inputParser;
             addParameter(p,'state_dim',length(meanVal));
+            addParameter(p,'L_max',50);
 
             parse(p, varargin{:});
             
             obj@BREW.distributions.TrajectoryBaseModel(idx, p.Results.state_dim);
             
+            obj.mean = meanVal; 
             obj.means = meanVal;
-            obj.mean_history = meanVal;
-            obj.covariances = covVal;
-            obj.cov_history = covVal;
+            obj.mean_history = meanVal; 
+            obj.covariances = covVal; 
+            obj.L_max = p.Results.L_max;
 
         end 
-        
-        function state = getLastState(obj)
-            % Gets most recent state
-            state = obj.means((length(obj.means) - obj.state_dim + 1):end,:);
+
+        % function state = getLastState(obj)
+        %     % Gets most recent state
+        %     state = obj.means((length(obj.means) - obj.state_dim + 1):end,:);
+        % end
+
+        function append_history(obj, val)
+            obj.mean_history = [obj.mean_history, val]; 
         end
 
         function cov = getLastCov(obj)
@@ -37,12 +45,12 @@ classdef TrajectoryGaussian < BREW.distributions.TrajectoryBaseModel
         function states = RearrangeStates(obj)
             % Gets states from column to N X T matrix 
             % Useful for plotting
-            states = reshape(obj.means, [obj.state_dim length(obj.means) / obj.state_dim]);
+            states = reshape(obj.means, obj.state_dim, []);
         end
 
         function s = sample_measurements(obj,xy_indices,meas_cov)
-            mean = obj.getLastState(); 
-            mean_temp = mean(xy_indices); 
+            meanVal = obj.mean; 
+            mean_temp = meanVal(xy_indices); 
             s = mvnrnd(mean_temp(:)', meas_cov, 1)';
         end
 
@@ -54,7 +62,6 @@ classdef TrajectoryGaussian < BREW.distributions.TrajectoryBaseModel
             addParameter(p,'LineWidth',0.8);
             addParameter(p,'LineStyle','-'); 
             parse(p, varargin{:});
-
 
             addParameter(p,'window_style',p.Results.LineStyle); 
             addParameter(p,'window_color',p.Results.c); 
@@ -95,7 +102,7 @@ classdef TrajectoryGaussian < BREW.distributions.TrajectoryBaseModel
                 xlabel('X-axis');
                 ylabel('Y-axis'); 
                 
-            elseif isscalar(plt_inds) == 1 
+            elseif isscalar(plt_inds)
                 ind_valid = obj.init_idx+1:(obj.init_idx+obj.window_size);
                 plot(p.Results.ax, ind_valid, states(plt_inds,:), ...
                     'Color', p.Results.c,'LineStyle', p.Results.LineStyle, 'LineWidth', p.Results.LineWidth); 

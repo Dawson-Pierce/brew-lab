@@ -2,61 +2,135 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
     % Trajectory Gaussian Mixture object.
     
     properties (Dependent)
-        mean_trajectories       % Cell array of means for each trajectory
-        covariance_trajectories % Cell array of covariances for each trajectory 
+        mean % Property to get matrix of means for speedy propagation
+        idx % list of indices (important for RFS since birth model needs to change idx)
+        means % Cell of trajectory means
+        covariances % Cell of trajectory covariances
+        L % list of lengths for each distribution 
+        state_dim 
     end
 
     properties 
         isExtendedTarget = 0;
+        isTrajectory = 1;
+        L_max
     end
     
     methods
         function obj = TrajectoryGaussianMixture(varargin)
             p = inputParser; 
             p.CaseSensitive = true;
-            addParameter(p, 'dist_list', {});
-            addParameter(p, 'means', {});
-            addParameter(p, 'covariances', {});
-            addParameter(p, 'idx', {});
+            addParameter(p, 'dist_list', []);
+            addParameter(p, 'means', []);
+            addParameter(p, 'covariances', []);
+            addParameter(p, 'idx', []);
             addParameter(p,'weights',[]);
+            addParameter(p,'L_max',50);
 
             % Parse known arguments
-            parse(p, varargin{:});
-
-            dists = {};
+            parse(p, varargin{:}); 
 
             if ~isempty(p.Results.dist_list)
                 dists = p.Results.dist_list;
             end
 
             if ~isempty(p.Results.means) && ~isempty(p.Results.covariances) 
-                for i = 1:numel(p.Results.means)
-                    dists{end+1} = BREW.distributions.TrajectoryGaussian(p.Results.idx{i},p.Results.means{i}(:), p.Results.covariances{i});
+                nDists = size(p.Results.means,3);
+                for i = 1:nDists
+                    if isempty(p.Results.idx)
+                        idx_temp = 1;
+                    else
+                        idx_temp = p.Results.idx(i);
+                    end
+                    dists(i) = BREW.distributions.TrajectoryGaussian(idx_temp,p.Results.means(:,:,i), p.Results.covariances(:,:,i),'L_max',p.Results.L_max);
                 end 
             end
             obj@BREW.distributions.BaseMixtureModel(dists, p.Results.weights);
+
+            obj.L_max = p.Results.L_max;
+
         end
 
-        function val = get.mean_trajectories(obj)
-            val = cellfun(@(d) d.means, obj.distributions, 'UniformOutput', false);
+        function val = get.idx(obj) 
+            val = cat(1, obj.distributions.init_idx);
         end
-        function obj = set.mean_trajectories(obj, val)
-            for i = 1:numel(obj.distributions)
-                obj.distributions{i}.means = val{i};
+
+        function set.idx(obj, val)
+            for k = 1:numel(obj.distributions)
+                obj.distributions(k).init_idx = val(k); 
+            end
+        end 
+
+        function val = get.state_dim(obj) 
+            arr = cat(1, obj.distributions.state_dim);
+            val = round(sum(arr)/length(arr));
+        end
+
+        function val = get.L(obj) 
+            val = cat(1, obj.distributions.L);
+        end
+
+        function obj = append_history(obj, val)
+            for k = 1:numel(obj.distributions)
+                obj.distributions(k).mean_history = [obj.distributions(k).mean_history, val(:,:,k)];
             end
         end
-        function val = get.covariance_trajectories(obj)
-            val = cellfun(@(d) d.covariances, obj.distributions, 'UniformOutput', false);
-        end
-        function obj = set.covariance_trajectories(obj, val)
-            for i = 1:numel(obj.distributions)
-                obj.distributions{i}.covariances = val{i};
+
+        function set.L(obj, val)
+            for k = 1:numel(obj.distributions)
+                obj.distributions(k).L = val(k); 
             end
         end
+
+        function val = get.mean(obj) 
+            val = cat(3, obj.distributions.mean);
+        end  
+
+        function val = GetCovs(obj,idx) 
+            val = cat(3, obj.distributions(idx).covariances);
+        end
+        function obj = SetCovs(obj, val, idx) 
+            arr = find(idx); 
+            for i = 1:numel(arr)
+                obj.distributions(arr(i)).covariances = val(:,:,i);
+            end
+        end
+
+        function val = GetMeans(obj,idx)
+            val = cat(3, obj.distributions(idx).means);
+        end
+        function obj = SetMeans(obj, val, idx) 
+            arr = find(idx); 
+            for i = 1:numel(arr)
+                obj.distributions(arr(i)).means = val(:,:,i); 
+
+                % Automatically set the history (less function calls in the filter, and less loops)
+                nx = obj.distributions(arr(i)).state_dim;
+                L = size(val(:,:,i),1) / nx;
+                obj.distributions(arr(i)).mean_history(:,end-L+1:end) = reshape(val(:,:,i),nx,[]); 
+
+                obj.distributions(arr(i)).mean = obj.distributions(arr(i)).mean_history(:,end);
+            end
+        end
+
+        function obj = AppendMeanHistory(obj,val) 
+            for i = 1:numel(obj.distributions)
+                obj.distributions(i).mean_history(:,end+1) = val(:,:,i); 
+            end
+        end
+
+        % function obj = SetMeanHistory(obj, val, idx) 
+        %     arr = 1:numel(obj.distributions); 
+        %     for i = 1:numel(arr(idx))
+        %         nx = obj.distributions(arr(i)).state_dim;
+        %         L = size(val(:,:,i),1) / nx;
+        %         obj.distributions(arr(i)).mean_history(:,end-L+1:end) = val(:,:,i); 
+        %     end
+        % end
 
         function plot_distributions(obj, plt_inds, varargin)
 
-            n = numel(obj.distributions); 
+            n = numel(obj.distributions);
 
             p = inputParser;
             p.KeepUnmatched = true;
@@ -72,8 +146,10 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
 
             colors = flip(colors);
 
+            hold on;
+
             for k = 1:length(obj.distributions)
-                obj.distributions{k}.plot(plt_inds,'c',colors(k,:),p.Unmatched);
+                obj.distributions(k).plot(plt_inds,'c',colors(k,:),p.Unmatched);
             end 
         end
         
@@ -86,8 +162,8 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
 
             all_meas = []; 
             for i = 1:numel(obj.distributions)
-                if obj.distributions{i}.init_idx <= idx
-                    mi = obj.distributions{i}.sample_measurements(xy_inds, meas_cov);
+                if obj.distributions(i).init_idx <= idx
+                    mi = obj.distributions(i).sample_measurements(xy_inds, meas_cov);
                     all_meas = [all_meas, mi];  
                 end
             end
@@ -110,11 +186,11 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
                 % ---- find closest pair by last-state Mahalanobis^2 ----
                 best_d2 = inf; best_i = 0; best_j = 0; 
                 for i = 1:N
-                    mi = dists{i}.means;
-                    Pi = dists{i}.covariances; Pi = 0.5*(Pi+Pi');
+                    mi = dists(i).means;
+                    Pi = dists(i).covariances; Pi = 0.5*(Pi+Pi');
                     for j = i+1:N
-                        mj = dists{j}.means;
-                        Pj = dists{j}.covariances; Pj = 0.5*(Pj+Pj');
+                        mj = dists(i).means;
+                        Pj = dists(i).covariances; Pj = 0.5*(Pj+Pj');
                         
                         if size(mi) == size(mj) % Checks if lengths are the same, since we're absorbing trajectories and L-scan implementations should handle this 
                             C = 0.5*(Pi + Pj); C = 0.5*(C + C');
@@ -152,13 +228,13 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
                     end
                     wi = weights(i); wj = weights(j); W = wi + wj;
 
-                    mi = dists{i}.getLastState();
-                    mj = dists{j}.getLastState();
-                    Pi = 0.5*(dists{i}.getLastCov() + dists{i}.getLastCov()'); 
-                    Pj = 0.5*(dists{j}.getLastCov() + dists{j}.getLastCov()');
+                    mi = dists(i).mean;
+                    mj = dists(j).mean;
+                    Pi = 0.5*(dists(i).getLastCov() + dists(i).getLastCov()'); 
+                    Pj = 0.5*(dists(j).getLastCov() + dists(j).getLastCov()');
 
-                    len_i = size(dists{i}.mean_history, 2);
-                    len_j = size(dists{j}.mean_history, 2);
+                    len_i = size(dists(i).mean_history, 2);
+                    len_j = size(dists(j).mean_history, 2);
 
                     if len_i > len_j || (len_i == len_j && wi >= wj)
                         keep = i; drop = j;
@@ -168,7 +244,7 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
                         m_keep = mj; P_keep = Pj; m_other = mi; P_other = Pi;
                     end
 
-                    base  = dists{keep};
+                    base  = dists(keep);
                     d     = base.state_dim;
                     nTot  = numel(base.means);
                     idxk  = (nTot - d + 1) : nTot;
@@ -178,7 +254,7 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
                     Cfull(idxk, idxk) = P_keep;
                     base.covariances = 0.5*(Cfull + Cfull');
 
-                    dists{keep}   = base;
+                    dists(keep)   = base;
                     weights(keep) = W;
                     dists(drop)   = [];
                     weights(drop) = [];
@@ -202,7 +278,7 @@ classdef TrajectoryGaussianMixture < BREW.distributions.BaseMixtureModel
                 else
                     fprintf('Component %d (weight = %g):\n', i, obj.weights(i));
                 end
-                disp(obj.distributions{i});
+                disp(obj.distributions(i));
             end
         end
         

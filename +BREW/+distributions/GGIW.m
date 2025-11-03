@@ -31,46 +31,7 @@ classdef GGIW < BREW.distributions.BaseSingleModel
             end
         end
         
-        function m = get.alpha(obj)
-            m = obj.alpha;
-        end
-        function obj = set.alpha(obj, val)
-            obj.alpha = val;
-        end
-        function c = get.beta(obj)
-            c = obj.beta;
-        end
-        function obj = set.beta(obj, val)
-            obj.beta = val;
-        end
-        
-        function m = get.mean(obj)
-            m = obj.mean;
-        end
-        function obj = set.mean(obj, val)
-            obj.mean = val;
-        end
-        function c = get.covariance(obj)
-            c = obj.covariance;
-        end
-        function obj = set.covariance(obj, val)
-            obj.covariance = val;
-        end
-
-        function m = get.IWdof(obj)
-            m = obj.IWdof;
-        end
-        function obj = set.IWdof(obj, val)
-            obj.IWdof = val;
-        end
-        function c = get.IWshape(obj)
-            c = obj.IWshape;
-        end
-        function obj = set.IWshape(obj, val)
-            obj.IWshape = val;
-        end
-        
-        function measurements = sample_measurements(obj, xy_inds, random_extent) 
+        function measurements = sample_measurements(obj, xy_inds) 
             if nargin < 2 || isempty(xy_inds)
                 if obj.d == 2
                     xy_inds = [1 2]; 
@@ -79,16 +40,11 @@ classdef GGIW < BREW.distributions.BaseSingleModel
                 else
                     error("Invalid IW Shape.")
                 end
-            end
-            if nargin < 3, random_extent = false; end
+            end 
             lam = obj.alpha / obj.beta;
             N = poissrnd(lam);
             center = obj.mean(xy_inds);
-            if random_extent
-                extent = iwishrnd(obj.IWshape, obj.IWdof);
-            else
-                extent = obj.IWshape / (obj.IWdof + obj.d + 1);
-            end
+            extent = obj.IWshape / (obj.IWdof + obj.d + 1);
             if N > 0
                 measurements = mvnrnd(center(:)', extent, N)';
             else
@@ -97,14 +53,16 @@ classdef GGIW < BREW.distributions.BaseSingleModel
         end
         
         function disp(obj) 
-            fprintf('Gamma: alpha = %g, beta = %g\n', obj.alpha, obj.beta);
-            fprintf('Gaussian mean = \n');
-            disp(obj.mean);
-            fprintf('Gaussian covariance = \n');
-            disp(obj.covariance);
-            fprintf('IW dof = %g\n', obj.IWdof);
-            fprintf('IW shape = \n');
-            disp(obj.IWshape);
+            for k = 1:numel(obj)
+                fprintf('Gamma: alpha = %g, beta = %g\n', obj(k).alpha, obj(k).beta);
+                fprintf('Gaussian mean = \n');
+                disp(obj(k).mean);
+                fprintf('Gaussian covariance = \n');
+                disp(obj(k).covariance);
+                fprintf('IW dof = %g\n', obj(k).IWdof);
+                fprintf('IW shape = \n');
+                disp(obj(k).IWshape);
+            end
         end
         
         function plot_distribution(obj, ax, plt_inds, h, color) 

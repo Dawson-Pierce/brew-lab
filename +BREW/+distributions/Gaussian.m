@@ -32,27 +32,33 @@ classdef Gaussian < BREW.distributions.BaseSingleModel
             p = mvnpdf(x(:)', obj.mean(:)', obj.covariance);
         end
         
-        function disp(obj) 
-            fprintf('Mean = \n');
-            disp(obj.mean);
-            fprintf('Covariance = \n');
-            disp(obj.covariance);
+        function disp(obj)
+            for k = 1:numel(obj)
+                fprintf('Mean = \n');
+                disp(obj(k).mean);
+                fprintf('Covariance = \n');
+                disp(obj(k).covariance);
+            end
         end
         
-        function plot_distribution(obj, ax, plt_inds, num_std, color) 
-            if nargin < 2 || isempty(ax), ax = gca; end
-            if nargin < 3 || isempty(plt_inds)
-                error('plot_distribution requires plt_inds for which states to plot.');
-            end
-            if nargin < 4 || isempty(num_std), num_std = 2; end 
-            if nargin < 5, color = 'b'; end 
+        function plot_distribution(obj, plt_inds, varargin) 
+            p = inputParser;
+            p.KeepUnmatched = true;
+            addParameter(p,'color','w');
+            addParameter(p,'ax',gca);
+            addParameter(p,'num_std',2);
+            parse(p, varargin{:});
     
+            color = p.Results.color;
+            num_std = p.Results.num_std;
+            ax = p.Results.ax;
+
             mu = obj.mean(:); 
             Sigma = obj.covariance;
             mu2 = mu(plt_inds); 
             Sigma2 = Sigma(plt_inds, plt_inds);
 
-            if length(mu2) == 1
+            if isscalar(mu2)
                 x = linspace(mu2 - num_std*sqrt(Sigma2), mu2 + num_std*sqrt(Sigma2), 200);
                 y = normpdf(x, mu2, sqrt(Sigma2));
                 plot(ax, x, y, 'Color', color, 'DisplayName', sprintf('%d-sigma PDF', num_std));

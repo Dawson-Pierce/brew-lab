@@ -2,8 +2,8 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
     % Gaussian Mixture object.
     
     properties (Dependent)
-        means       % Cell array of means for each component
-        covariances % Cell array of covariances for each component
+        mean       % Cell array of means for each component
+        covariance % Cell array of covariances for each component
     end
 
     properties 
@@ -14,70 +14,50 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
         function obj = GaussianMixture(varargin)
             p = inputParser; 
             p.CaseSensitive = true;
-            addParameter(p, 'dist_list', {});
-            addParameter(p, 'means', {});
-            addParameter(p, 'covariances', {});
+            addParameter(p, 'dist_list', []);
+            addParameter(p, 'means', []);
+            addParameter(p, 'covariances', []);
             addParameter(p,'weights',[]);
 
             % Parse known arguments
             parse(p, varargin{:});
-
-            dists = {};
 
             if ~isempty(p.Results.dist_list)
                 dists = p.Results.dist_list;
             end
 
             if ~isempty(p.Results.means) && ~isempty(p.Results.covariances) 
-                for i = 1:numel(p.Results.means)
-                    dists{end+1} = BREW.distributions.Gaussian(p.Results.means{i}, p.Results.covariances{i});
+                nDists = size(p.Results.means,3); 
+                for i = 1:nDists 
+                    dists(i) = BREW.distributions.Gaussian(p.Results.means(:,:,i), p.Results.covariances(:,:,i));
                 end 
             end
             obj@BREW.distributions.BaseMixtureModel(dists, p.Results.weights);
         end
 
-        function val = get.means(obj)
-            val = cellfun(@(d) d.mean, obj.distributions, 'UniformOutput', false);
+        function val = get.mean(obj) 
+            val = cat(3, obj.distributions.mean);
         end
-        function obj = set.means(obj, val)
-            for i = 1:numel(obj.distributions)
-                obj.distributions{i}.mean = val{i};
+
+        function set.mean(obj, val)
+            for k = 1:numel(obj.distributions)
+                obj.distributions(k).mean = val(:, :, k);
             end
         end
-        function val = get.covariances(obj)
-            val = cellfun(@(d) d.covariance, obj.distributions, 'UniformOutput', false);
+        function val = get.covariance(obj) 
+            val = cat(3, obj.distributions.covariance);
         end
-        function obj = set.covariances(obj, val)
-            for i = 1:numel(obj.distributions)
-                obj.distributions{i}.covariance = val{i};
+        function set.covariance(obj, val)
+            for k = 1:numel(obj.distributions)
+                obj.distributions(k).covariance = val(:, :, k);
             end
-        end
-        
-        function newObj = copy(obj)
-            % Deep copy of the GaussianMixture object
-            new_means = obj.means;
-            new_covariances = obj.covariances;
-            new_weights = obj.weights;
-            newObj = BREW.distributions.GaussianMixture(new_means, new_covariances, new_weights);
-        end
-        
-        function s = sample(obj, numSamples)
-            % Draw samples from the mixture model
-            if nargin < 2, numSamples = 1; end
-            w = obj.weights(:) / sum(obj.weights);
-            idx = randsample(1:numel(obj.distributions), numSamples, true, w);
-            d = length(obj.distributions{1}.mean);
-            s = zeros(d, numSamples);
-            for i = 1:numSamples
-                s(:,i) = obj.distributions{idx(i)}.sample(1);
-            end
-        end
+        end 
         
         function p = pdf(obj, x)
             % Evaluate the PDF at point x
             p = 0;
             for i = 1:numel(obj.distributions)
-                p = p + obj.weights(i) * obj.distributions{i}.pdf(x);
+                p = p + obj.weights(i) * obj.distributions(i).pdf(x);
             end
         end
 
@@ -85,7 +65,7 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
 
             all_meas = []; 
             for i = 1:numel(obj.distributions)
-                mi = obj.distributions{i}.sample_measurements(xy_inds);
+                mi = obj.distributions(i).sample_measurements(xy_inds);
                 all_meas = [all_meas, mi];  
             end
         
@@ -100,7 +80,7 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
                 else
                     fprintf('Component %d (weight = %g):\n', i, obj.weights(i));
                 end
-                disp(obj.distributions{i});
+                disp(obj.distributions(i))
             end
         end
 
@@ -109,24 +89,32 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
                 threshold = 4; % default Mahalanobis^2 threshold
             end
         
-            means_copy = obj.means;
-            covs = obj.covariances;
-            weights = obj.weights;
+            means = obj.means;          % n×1×M
+            covs = obj.covariances;     % n×n×M
+            weights = obj.weights(:);   % M×1
+            nComp = numel(weights);
         
             keepMerging = true;
-            while keepMerging && numel(means_copy) > 1
-                keepMerging = false;
-                N = numel(means_copy);
         
-                % find closest pair
+            while keepMerging && nComp > 1
+                keepMerging = false;
+        
+                % compute pairwise Mahalanobis distances
                 minDist = inf;
                 pair = [];
-                for i = 1:N
-                    for j = i+1:N
-                        diff = means_copy{i} - means_copy{j};
-                        % symmetric Mahalanobis distance using avg covariance
-                        C = (covs{i} + covs{j})/2;
+        
+                for i = 1:nComp
+                    mi = means(:, :, i);
+                    Pi = covs(:, :, i);
+        
+                    for j = i+1:nComp
+                        mj = means(:, :, j);
+                        Pj = covs(:, :, j);
+        
+                        diff = mi - mj;
+                        C = 0.5 * (Pi + Pj);
                         d2 = diff' * (C \ diff);
+        
                         if d2 < minDist
                             minDist = d2;
                             pair = [i j];
@@ -134,43 +122,62 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
                     end
                 end
         
+                % merge if below threshold
                 if minDist < threshold
                     i = pair(1); j = pair(2);
         
-                    wi = weights(i); wj = weights(j);
-                    mi = means_copy{i}; mj = means_copy{j};
-                    Pi = covs{i}; Pj = covs{j};
+                    wi = weights(i);
+                    wj = weights(j);
+                    mi = means(:, :, i);
+                    mj = means(:, :, j);
+                    Pi = covs(:, :, i);
+                    Pj = covs(:, :, j);
+        
                     w = wi + wj;
-                    m = (wi*mi + wj*mj) / w;
-                    P = (wi*(Pi + (mi-m)*(mi-m)') + ...
-                         wj*(Pj + (mj-m)*(mj-m)')) / w;
+                    m = (wi * mi + wj * mj) / w;
+                    P = (wi * (Pi + (mi - m) * (mi - m)') + ...
+                         wj * (Pj + (mj - m) * (mj - m)')) / w;
         
                     % replace i with merged, delete j
-                    means_copy{i} = m;
-                    covs{i} = P;
+                    means(:, :, i) = m;
+                    covs(:, :, i) = P;
                     weights(i) = w;
         
-                    means_copy(j) = [];
-                    covs(j) = [];
+                    means(:, :, j) = [];
+                    covs(:, :, j) = [];
                     weights(j) = [];
         
+                    nComp = nComp - 1;
                     keepMerging = true;
                 end
             end
         
             obj = BREW.distributions.GaussianMixture( ...
-                'means', means_copy, ...
+                'means', means, ...
                 'covariances', covs, ...
-                'weights', weights );
+                'weights', weights);
         end
 
-        function plot_distributions(obj, ax, plt_inds, num_std, colors)
-            % Plot all GGIW components in 2D (or 3D if plt_inds has 3 elements)
-            if nargin < 2 || isempty(ax),        ax = gca;       end
-            if nargin < 3 || isempty(plt_inds),   plt_inds = [1 2]; end
-            if nargin < 4 || isempty(num_std),          num_std = 1;      end
-        
+
+        function plot_distributions(obj, plt_inds, varargin) 
+
             n = numel(obj.distributions);
+
+            p = inputParser;
+            p.KeepUnmatched = true;
+            addParameter(p,'colors',lines(n)) 
+            addParameter(p,'ax',gca)
+            addParameter(p,'num_std',2)
+            parse(p, varargin{:});
+
+            colors = p.Results.colors; 
+            ax = p.Results.ax;
+            num_std = p.Results.num_std;
+        
+            % if user passed a single color (char or 1×3), replicate it
+            if (ischar(colors) && size(colors,1)==1) || (isnumeric(colors) && isequal(size(colors),[1,3]))
+                colors = repmat(colors, n, 1);
+            end 
         
             % if no colors given, pull an n‐by‐3 list from lines
             if nargin < 5 || isempty(colors)
@@ -185,7 +192,7 @@ classdef GaussianMixture < BREW.distributions.BaseMixtureModel
             for i = 1:n
                 % pick the i-th row of colors as an RGB triplet
                 c = colors(i,:);
-                obj.distributions{i}.plot_distribution(ax, plt_inds, num_std, c);
+                obj.distributions(i).plot_distribution(plt_inds, 'ax', ax, 'num_std', num_std, 'color',c);
             end
         end
         

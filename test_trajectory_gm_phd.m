@@ -2,9 +2,9 @@ clear; clc; close all
 
 %% Target setup
 
-means = {[0; -20; 1; 1/2], [0; 20; 1; -1/2], [0; 0; 1; 0]};
-covariances = repmat({zeros(4)},1,3); 
-idx = {1, 1, 5};
+means = cat(3,[0; -20; 1; 1/2], [0; 20; 1; -1/2], [0; 0; 1; 0]);
+covariances = repmat(zeros(4),1,1,3); 
+idx = [1, 1, 1];
 weights = [1, 1, 1];
 
 truth = BREW.distributions.TrajectoryGaussianMixture( ...
@@ -17,9 +17,8 @@ truth = BREW.distributions.TrajectoryGaussianMixture( ...
 %% birth model setup
 
 birth = BREW.distributions.TrajectoryGaussianMixture( ...
-    'idx',{1}, ...
-    'means',{[0; 0; 1; 0]}, ...
-    'covariances',{diag([1, 50, 1.5, 1])}, ...
+    'means',[0; 0; 1; 0], ...
+    'covariances',diag([1, 1000, 1.5, 1]), ...
     'weights',[1]);
 
 %% inner filter setup
@@ -54,14 +53,9 @@ max_meas = 60;
 x_bound = [-20 120];
 y_bound = [-70 70];
 
-for k = 1:length(t)
-    
-    for ii = 1:length(truth)
-        if truth.distributions{ii}.init_idx <= k
-            truth.distributions{ii} = ekf.predict(dt,truth.distributions{ii}); 
-        end
-    end
-
+for k = 1:5 %length(t)
+    fprintf("Time step: %i \n",k)
+    truth = ekf.predict(dt,truth); 
 
     num_noise_meas = round(max_meas * rand(1));
     x_noise = rand(1,num_noise_meas) * (x_bound(2) - x_bound(1)) + x_bound(1);
@@ -71,12 +65,11 @@ for k = 1:length(t)
 
     meas = truth.sample_measurements([1,2], k, meas_cov);
 
-    meas = [meas, noisy_meas];
+    % meas = [meas, noisy_meas];
 
     meas_hst = [meas_hst, meas];
 
     phd.predict(dt,{}); 
-
     phd.correct(dt, meas); 
 
     est_mix = phd.cleanup();
@@ -84,7 +77,7 @@ for k = 1:length(t)
     % Plotting 
     scatter(meas(1,:),meas(2,:), 8,'w*'); grid on; hold on
 
-    est_mix.plot_distributions([1 2],'LineWidth',2,'window_color','r','window_width',2.5); hold off
+    phd.Mix.plot_distributions([1 2],'LineWidth',2,'window_color','r','window_width',2.5); hold off
 
     xlim(x_bound)
     ylim(y_bound)

@@ -23,7 +23,7 @@ R = 0.2 * eye(3); % Measurement noise
 % --- EKF Initialization ---
 process_noise = 0.01 * eye(length(meanVal));
 GGIW_init = BREW.distributions.GGIW(alpha, beta, meanVal, covVal, IWdof, IWshape); % Same as truth for simplicity
-EKF = BREW.filters.ExtendedKalmanFilter('dyn_obj', motion, 'H', H);
+EKF = BREW.filters.GGIWEKF('dyn_obj', motion, 'H', H);
 EKF.setProcessNoise(process_noise);
 EKF.setMeasurementNoise(R);
 

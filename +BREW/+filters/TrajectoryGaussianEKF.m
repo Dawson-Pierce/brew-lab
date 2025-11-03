@@ -2,8 +2,7 @@ classdef TrajectoryGaussianEKF < BREW.filters.FiltersBase
     % Extended Kalman Filter / Kalman Filter class for gaussian
     % trajectories
 
-    properties
-        L_window % For efficient computing of trajectory matrices
+    properties 
     end
 
     methods
@@ -18,130 +17,148 @@ classdef TrajectoryGaussianEKF < BREW.filters.FiltersBase
             
             obj@BREW.filters.FiltersBase(p.Unmatched);
 
-            obj.L_window = p.Results.L;
-
         end
-        function nextDist = predict(obj, dt, prevDist, varargin)
-            p = inputParser; 
-            p.CaseSensitive = true; 
-            p.KeepUnmatched   = true; 
-            addParameter(p,'dyn_obj',[]); % adds capability to change dynamics model
-            addParameter(p,'process_noise',[]); 
-
-            % Parse known arguments
-            parse(p, varargin{:}); 
-
-            dyn_obj = p.Results.dyn_obj;
-            proc_noise = p.Results.process_noise; 
-
-            if (prevDist.window_size < obj.L_window)
-                start_idx = 1;
-            else
-                start_idx = prevDist.state_dim+1;
-            end
-
-            prevState = prevDist.getLastState();
-            prevCov = prevDist.covariances(start_idx:end,start_idx:end); 
-
-            if ~isempty(dyn_obj)
-                nextState = dyn_obj.propagateState(dt, prevState, p.Unmatched);
-                F =  dyn_obj.getStateMat(dt, prevState);
-            elseif ~isempty(obj.dyn_obj_)
-                nextState = obj.dyn_obj_.propagateState(dt, prevState, p.Unmatched);
-                F =  obj.dyn_obj_.getStateMat(dt, prevState);
-            end
-
-            if (prevDist.window_size < obj.L_window)
-                F_dot = kron([zeros(1,prevDist.window_size-1), 1],F);
-            else
-                F_dot = kron([zeros(1,obj.L_window-2), 1],F);
-            end
-
-            if isempty(proc_noise)
-                proc_noise = obj.process_noise;
-            end 
-
-            newCov = [prevCov, prevCov * F_dot'; F_dot * prevCov, F_dot * prevCov * F_dot' + proc_noise]; 
-
-            newMean = [prevDist.means(start_idx:end); nextState];
-
-            nextDist = prevDist;
-            nextDist.means = newMean;
-            nextDist.covariances = newCov;
-            nextDist.cov_history(:,:,end+1) = newCov((end-prevDist.state_dim+1):end,(end-prevDist.state_dim+1):end);
-
-            if (prevDist.window_size < obj.L_window)
-                nextDist.mean_history = nextDist.RearrangeStates();
-            else
-                nextDist.mean_history(:,end-obj.L_window+2:end+1) = nextDist.RearrangeStates();
-            end
-            nextDist.window_size = nextDist.window_size+1;
+        function dist = predict(obj, dt, dist, varargin) 
+            p = inputParser;
+            p.CaseSensitive = true;
+            p.KeepUnmatched = true;
+            addParameter(p,'dyn_obj',obj.dyn_obj_);
+            addParameter(p,'process_noise',obj.process_noise);
+            parse(p,varargin{:});
         
+            dyn_obj   = p.Results.dyn_obj;
+            proc_noise = p.Results.process_noise; 
+            prevMean = dist.mean; 
+
+            nx = size(prevMean,1); 
+        
+            L = dist.L;
+
+            [uniqueL,~,ic] = unique(L); 
+
+            nextState = dyn_obj.propagateState(dt, prevMean, p.Unmatched);
+            dist.AppendMeanHistory(nextState);
+            F_all     = dyn_obj.getStateMat(dt, prevMean);
+        
+            for j = 1:numel(uniqueL)
+
+                curr_idx = ic == j; % should produce logical array we can use for each unique length
+                L_temp = uniqueL(j);
+
+                P = dist.GetCovs(curr_idx);
+                means = dist.GetMeans(curr_idx);
+                F = F_all(:,:,curr_idx); 
+
+                F_dot = zeros(size(F,1), size(F,2)*L_temp, size(F,3), 'like', F);
+                F_dot(:, end-size(F,1)+1:end, :) = F;
+        
+                PFt  = pagemtimes(P, permute(F_dot,[2 1 3])); 
+                FPFt = pagemtimes(F_dot, PFt); 
+        
+                if L_temp >= dist.L_max 
+                    newCovBlock = zeros(size(P), 'like', P); 
+                    newCovBlock(1:end-nx, 1:end-nx, :) = P(nx+1:end, nx+1:end, :); 
+                    newCovBlock(end-nx+1:end, end-nx+1:end, :) = FPFt + proc_noise;
+                    PFt = PFt(1:end-nx,:,:);
+                    newCovBlock(1:end-nx, end-nx+1:end, :) = PFt;
+                    newCovBlock(end-nx+1:end, 1:end-nx, :) = permute(PFt, [2 1 3]);
+
+                    newMeans = zeros(size(means), 'like', means); 
+                    newMeans(1:end-nx,1,:) = means(nx+1:end,:);
+                    newMeans(end-nx+1:end,1,:) = nextState(:,:,curr_idx);
+                else
+                    newCovBlock = zeros(size(P,1)+nx, size(P,2)+nx, size(P,3), 'like', P);
+                    newCovBlock(1:size(P,1), 1:size(P,2), :) = P;
+                    newCovBlock(1:size(P,1), size(P,2)+1:end, :) = PFt;
+                    newCovBlock(size(P,1)+1:end, 1:size(P,2), :) = permute(PFt,[2 1 3]);
+                    newCovBlock(size(P,1)+1:end, size(P,2)+1:end, :) = FPFt + proc_noise;
+
+                    newMeans = zeros(size(means,1)+nx,1,size(means,3), 'like', means); 
+                    newMeans(1:end-nx,1,:) = means;
+                    newMeans(end-nx+1:end,1,:) = nextState(:,:,curr_idx);
+                end
+        
+                dist.SetCovs(newCovBlock,curr_idx); 
+                dist.SetMeans(newMeans,curr_idx);
+                dist.L(curr_idx) = min(dist.L_max, dist.L(curr_idx) + 1); 
+            end 
         end
-        function [nextDist, likelihood] = correct(obj, dt, meas, prevDist, varargin) 
+
+
+        function [dist, likelihood] = correct(obj, dt, meas, dist, varargin)
 
             p = inputParser; 
             p.CaseSensitive = true;
-            addParameter(p,'H',[]); % could be constant, could be function handle ie H = @(x) ...
-            addParameter(p,'h',[]); % expected to be function handle ie h = @(x) ...
-            addParameter(p,'meas_noise',[]); 
-
-            % Parse known arguments
+            p.KeepUnmatched = true;
+            addParameter(p,'H',[]); 
+            addParameter(p,'h',[]); 
+            addParameter(p,'meas_noise',obj.measurement_noise); 
             parse(p, varargin{:});
-
+        
             h_input = p.Results.h;
             H_input = p.Results.H;
             meas_noise = p.Results.meas_noise;
-
-            prevState = prevDist.getLastState();
-            prevCov = prevDist.covariances;  
-
+        
+            prevMean = dist.mean; 
+            nx = size(prevMean,1);            
+        
             if ~isempty(h_input)
-                est_meas = h_input(prevState);
+                est_meas = h_input(prevMean);
             else
-                est_meas = obj.estimate_measurement(prevState); 
-            end 
-
+                est_meas = obj.estimate_measurement(prevMean);
+            end
+        
             if ~isempty(H_input)
                 if isa(H_input,'function_handle')
-                    H = H_input(prevState);
+                    H = H_input(prevMean);
                 else
                     H = H_input;
                 end
             else
-                H = obj.getMeasurementMatrix(prevState);
-            end 
-
-            if (prevDist.window_size - obj.L_window) < 0
-                H_dot = kron([zeros(1,prevDist.window_size-1), 1],H);
-            else
-                H_dot = kron([zeros(1,obj.L_window-1), 1],H);
+                H = obj.getMeasurementMatrix(prevMean);
             end
 
-            % H_dot = kron([zeros(1,prevDist.window_size-1), 1],H);
+            L = dist.L;
+            uniqueL = unique(L);
 
-            % est_meas = H_dot * prevDist.means;
+            likelihood = zeros(1,size(prevMean,3),'like',prevMean); 
+            counter = 1;
+        
+            for j = 1:numel(uniqueL)
 
-            epsilon = meas - est_meas; 
+                L_temp = uniqueL(j);
+                curr_idx = L == L_temp; % should produce logical array we can use for each unique length 
+        
+                P = dist.GetCovs(curr_idx);
+                means = dist.GetMeans(curr_idx);
 
-            if ~isempty(meas_noise)
-                S = H_dot * prevCov * H_dot' + meas_noise; 
-            else
-                S = H_dot * prevCov * H_dot' + obj.measurement_noise; 
+                H_dot = zeros(size(H,1), size(H,2)*L_temp, size(means,3), 'like', means);
+                H_dot(:, end-size(H,2)+1:end,:) = H(:,:,curr_idx); 
+
+                PHt = pagemtimes(P, permute(H_dot,[2 1 3]));
+                S   = pagemtimes(H_dot, PHt) + meas_noise;
+
+                est_measurements = est_meas(:,:,curr_idx);
+
+                K   = pagemtimes(PHt, pageinv(S));
+
+                eps = meas - est_measurements;
+                Xnew = means + pagemtimes(K, eps);
+                
+                KH = pagemtimes(K, H_dot);
+                Pnew = P - pagemtimes(KH, P);
+
+                dist.SetMeans(Xnew,curr_idx);
+                dist.SetCovs(Pnew,curr_idx); 
+
+                for k = 1:size(S,3)
+                    likelihood(counter) = mvnpdf(meas', est_measurements(:,:,k)', S(:,:,k));
+                    counter = counter + 1;
+                end
             end
-
-            K = prevCov * H_dot' * S^-1;
-
-            newCov = prevDist.covariances - K * H_dot * prevDist.covariances;
-
-            nextDist = prevDist; 
-            nextDist.means = prevDist.means + K * epsilon;
-            nextDist.covariances = newCov;
-            nextDist.cov_history(:,:,end) = newCov((end-prevDist.state_dim+1):end,(end-prevDist.state_dim+1):end);
-            
-            likelihood = mvnpdf(meas, est_meas, S);
         
         end
+
 
         function val = gate_meas(obj, pred_dist, z, gamma)
             state = pred_dist.getLastState();
