@@ -156,6 +156,8 @@ classdef TrajectoryGGIWEKF < BREW.filters.TrajectoryGaussianEKF
 
             nextDist = prevDist; 
             nextDist.means = prevDist.means + K * epsilon;
+            temp_means = nextDist.RearrangeStates();
+            nextDist.mean_history(:,end-size(temp_means,2)+1:end) = temp_means;
             nextDist.covariances = newCov;
             nextDist.cov_history(:,:,end) = newCov((end-prevDist.state_dim+1):end,(end-prevDist.state_dim+1):end);
 

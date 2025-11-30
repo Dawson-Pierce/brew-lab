@@ -178,7 +178,7 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
             for i = 1:n
                 % pick the i-th row of colors as an RGB triplet
                 c = colors(i,:);
-                obj.distributions{i}.plot_distribution(ax, plt_inds, h, c);
+                obj.distributions{i}.plot(plt_inds, 'h',ax, 'h', h, 'c', c);
             end
         end
 

@@ -22,9 +22,9 @@ classdef BaseSingleModel < matlab.mixin.Copyable
             p = NaN;
         end
         
-        function disp(obj)
-            % Display method for the distribution
-            fprintf('No information to show for this class '); 
-        end
+        % function disp(obj)
+        %     % Display method for the distribution
+        %     fprintf('No information to show for this class \n'); 
+        % end
     end
 end 
