@@ -28,10 +28,10 @@ classdef (Abstract) DynamicsBase < handle
         function setRotationModel(obj,M)
             obj.M = M;
         end
-        function new_extent = propagate_extent(obj, state, extent, varargin)
+        function new_extent = propagate_extent(obj, dt, state, extent, varargin)
             if ~isempty(obj.M)
                 if isa(obj.M,'function_handle')
-                    new_extent = obj.M(state) * extent * obj.M(state)';
+                    new_extent = obj.M(state,dt) * extent * obj.M(state,dt)';
                 else
                     new_extent = obj.M * extent * obj.M';
                 end

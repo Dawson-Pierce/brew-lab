@@ -13,7 +13,7 @@ GGIW_truth = BREW.distributions.GGIW(alpha, beta, meanVal, covVal, IWdof, IWshap
 
 % --- Motion Model ---
 dt = 0.2;
-num_steps = 100;
+num_steps = 20;
 motion = BREW.dynamics.Integrator_3D();
 
 % --- Measurement Model ---
@@ -23,7 +23,7 @@ R = 0.2 * eye(3); % Measurement noise
 % --- EKF Initialization ---
 process_noise = 0.01 * eye(length(meanVal));
 GGIW_init = BREW.distributions.GGIW(alpha, beta, meanVal, covVal, IWdof, IWshape); % Same as truth for simplicity
-EKF = BREW.filters.ExtendedKalmanFilter('dyn_obj', motion, 'H', H);
+EKF = BREW.filters.GGIWEKF('dyn_obj', motion, 'H', H);
 EKF.setProcessNoise(process_noise);
 EKF.setMeasurementNoise(R);
 
@@ -49,9 +49,9 @@ for k = 1:num_steps
     % --- Propagate Truth ---
     GGIW_truth.IWshape = motion.propagate_extent(GGIW_truth.mean, GGIW_truth.IWshape);
     if k == round(num_steps / 2)
-        GGIW_truth.mean = motion.propagateState([], dt, GGIW_truth.mean, rand(3,1));
+        GGIW_truth.mean = motion.propagateState(dt, GGIW_truth.mean, 'u' , rand(3,1));
     else
-        GGIW_truth.mean = motion.propagateState([], dt, GGIW_truth.mean);
+        GGIW_truth.mean = motion.propagateState(dt, GGIW_truth.mean);
     end
     
     % --- Generate Measurement ---
@@ -70,7 +70,7 @@ for k = 1:num_steps
     % --- Plot EKF Estimate Extent ---
     GGIW_est.plot_distribution(ax, 1:3, 0.95, 'r');
     % --- Plot Measurements ---
-    scatter3(meas(1,:), meas(2,:), meas(3,:), 'w*'); hold on
+    scatter3(meas(1,:), meas(2,:), meas(3,:), 0.5, 'k*'); hold on
     % --- Plot EKF Mean ---
     plot3(ax, GGIW_est.mean(1), GGIW_est.mean(2), GGIW_est.mean(3), 'ro', 'MarkerFaceColor', 'r');
     % --- Plot Truth Mean ---

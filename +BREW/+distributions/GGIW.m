@@ -9,6 +9,8 @@ classdef GGIW < BREW.distributions.BaseSingleModel
         IWdof 
         IWshape 
         d 
+        eigs
+        basis
     end 
     
     methods
@@ -30,46 +32,7 @@ classdef GGIW < BREW.distributions.BaseSingleModel
                 obj.d = size(IWshape,1);
             end
         end
-        
-        function m = get.alpha(obj)
-            m = obj.alpha;
-        end
-        function obj = set.alpha(obj, val)
-            obj.alpha = val;
-        end
-        function c = get.beta(obj)
-            c = obj.beta;
-        end
-        function obj = set.beta(obj, val)
-            obj.beta = val;
-        end
-        
-        function m = get.mean(obj)
-            m = obj.mean;
-        end
-        function obj = set.mean(obj, val)
-            obj.mean = val;
-        end
-        function c = get.covariance(obj)
-            c = obj.covariance;
-        end
-        function obj = set.covariance(obj, val)
-            obj.covariance = val;
-        end
-
-        function m = get.IWdof(obj)
-            m = obj.IWdof;
-        end
-        function obj = set.IWdof(obj, val)
-            obj.IWdof = val;
-        end
-        function c = get.IWshape(obj)
-            c = obj.IWshape;
-        end
-        function obj = set.IWshape(obj, val)
-            obj.IWshape = val;
-        end
-        
+                
         function measurements = sample_measurements(obj, xy_inds, random_extent) 
             if nargin < 2 || isempty(xy_inds)
                 if obj.d == 2
@@ -96,7 +59,7 @@ classdef GGIW < BREW.distributions.BaseSingleModel
             end
         end
         
-        function disp(obj) 
+        function disp_params(obj) 
             fprintf('Gamma: alpha = %g, beta = %g\n', obj.alpha, obj.beta);
             fprintf('Gaussian mean = \n');
             disp(obj.mean);
@@ -107,49 +70,34 @@ classdef GGIW < BREW.distributions.BaseSingleModel
             disp(obj.IWshape);
         end
         
-        function plot_distribution(obj, ax, plt_inds, h, color) 
-            if nargin < 2 || isempty(ax), ax = gca; end
-            if nargin < 3 || isempty(plt_inds) 
-                if obj.d == 2
-                    plt_inds = [1 2]; 
-                elseif obj.d == 3
-                    plt_inds = [1 2 3]; 
-                else
-                    error("Invalid IW Shape.")
-                end 
-            end
-            if nargin < 4 || isempty(h), h = 0.95; end
-            if nargin < 5, color = 'r'; end 
-            mu = obj.mean(:); 
-            V = obj.IWshape; 
-            v = obj.IWdof;  
+        function plot(obj, plt_inds, varargin)
+            p = inputParser;
+            p.KeepUnmatched = true; 
+            addParameter(p,'color','k');
+            addParameter(p,'ax',gca)
+            addParameter(p,'h',0.95)
+            addParameter(p,'LineWidth',0.8);
+            addParameter(p,'LineStyle','-'); 
+            parse(p, varargin{:});
+
+            q = inputParser;
+            addParameter(q,'h_LineStyle',p.Results.LineStyle)
+
+            parse(q, p.Unmatched)
+
+            ax = p.Results.ax;
+            h = p.Results.h;
+
+            mu = obj.mean;
+            V = obj.IWshape;
+            v = obj.IWdof;
+
             mu2 = mu(plt_inds); 
             V2 = V(plt_inds, plt_inds);
-            d = length(plt_inds);
-            if d == 2
-                plot(ax, mu2(1), mu2(2), '*', 'Color', color, 'DisplayName', "mean"); hold on
-                if v <= d+1
-                    error('Degrees of freedom must exceed d+1 for valid IW mean.');
-                end
-                mean_extent = V2 / (v - d - 1);
-                [Evec, Eval] = eig(mean_extent);
-                t = linspace(0, 2*pi, 100);
-                scale = sqrt(chi2inv(h, 2));
-                a = scale * sqrt(Eval(1,1)); 
-                b = scale * sqrt(Eval(2,2));
-                ellipse = Evec*[a*cos(t); b*sin(t)] + mu2; 
-                plot(ax, ellipse(1,:), ellipse(2,:), '--', 'Color', color, 'DisplayName', sprintf("%3.2f%% confidence interval",h*100));
-                a = sqrt(Eval(1,1)); 
-                b = sqrt(Eval(2,2));
-                ellipse = Evec*[a*cos(t); b*sin(t)] + mu2; 
-                plot(ax, ellipse(1,:), ellipse(2,:), '-', 'Color', color, 'DisplayName', "mean extent");
-            elseif d == 3
-                hold(ax, 'on');
-                plot3(ax, mu2(1), mu2(2), mu2(3), '*', 'Color', color, 'DisplayName', 'mean');
-                if v <= d+1
-                    error('Degrees of freedom must exceed d+1 for valid IW mean.');
-                end
-                mean_extent = V2 / (v - d - 1);
+
+            if length(plt_inds) == 3 
+
+                mean_extent = V2 / (v - obj.d - 1);
                 [Vmean, Dmean] = eig(mean_extent);
                 [x, y, z] = sphere(30);
                 xyz = [x(:) y(:) z(:)]';
@@ -157,7 +105,7 @@ classdef GGIW < BREW.distributions.BaseSingleModel
                 X = reshape(ellipsoid_pts(1,:), size(x));
                 Y = reshape(ellipsoid_pts(2,:), size(y));
                 Z = reshape(ellipsoid_pts(3,:), size(z));
-                surf(ax, real(X), real(Y), real(Z), 'FaceAlpha', 0.3, 'EdgeColor', color,'EdgeAlpha',0.3, 'LineStyle', '--', 'FaceColor', color, 'DisplayName', 'mean extent');
+                surf(ax, real(X), real(Y), real(Z), 'FaceAlpha', 0.3, 'EdgeColor', p.Results.color,'EdgeAlpha',0.3, 'LineStyle', p.Results.LineStyle, 'FaceColor', p.Results.color, 'DisplayName', 'mean extent');
                 scale = sqrt(chi2inv(h, 3));
                 conf_extent = mean_extent * scale^2;
                 [Vconf, Dconf] = eig(conf_extent);
@@ -165,9 +113,32 @@ classdef GGIW < BREW.distributions.BaseSingleModel
                 Xc = reshape(ellipsoid_pts_conf(1,:), size(x));
                 Yc = reshape(ellipsoid_pts_conf(2,:), size(y));
                 Zc = reshape(ellipsoid_pts_conf(3,:), size(z));
-                surf(ax, real(Xc), real(Yc), real(Zc), 'FaceAlpha', 0.15, 'EdgeColor', color,'EdgeAlpha',0.3, 'LineStyle', '--', 'FaceColor', color, 'DisplayName', sprintf('%3.2f%% confidence interval',h*100));
+                surf(ax, real(Xc), real(Yc), real(Zc), 'FaceAlpha', 0.15, 'EdgeColor', p.Results.color,'EdgeAlpha',0.3, 'LineStyle', q.Results.h_LineStyle, 'FaceColor', p.Results.color, 'DisplayName', sprintf('%3.2f%% confidence interval',h*100));
+                
+                % xlabel('X-axis');
+                % ylabel('Y-axis');
+                % zlabel('Z-axis');
+
+            elseif length(plt_inds) == 2 
+
+                mean_extent = V2 / (v - obj.d - 1);
+                [Evec, Eval] = eig(mean_extent);
+                t = linspace(0, 2*pi, 100);
+                scale = sqrt(chi2inv(h, 2));
+                a = scale * sqrt(Eval(1,1)); 
+                b = scale * sqrt(Eval(2,2));
+                ellipse = Evec*[a*cos(t); b*sin(t)] + mu2; 
+                plot(ax, ellipse(1,:), ellipse(2,:), q.Results.h_LineStyle, 'Color', p.Results.color, 'LineWidth',p.Results.LineWidth, 'DisplayName', sprintf("%3.2f%% confidence interval",h*100));
+                a = sqrt(Eval(1,1)); 
+                b = sqrt(Eval(2,2));
+                ellipse = Evec*[a*cos(t); b*sin(t)] + mu2; 
+                plot(ax, ellipse(1,:), ellipse(2,:), p.Results.LineStyle, 'Color', p.Results.color, 'LineWidth',p.Results.LineWidth, 'DisplayName', "mean extent");
+                
+                % xlabel('X-axis');
+                % ylabel('Y-axis'); 
+                
             else
-                error('plot_distribution only supports 2D or 3D for extent.');
+                disp("error plotting - please have plt_inds be a length of 2 or 3")
             end
         end
     end

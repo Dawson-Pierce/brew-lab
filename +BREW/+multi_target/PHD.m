@@ -57,8 +57,12 @@ classdef PHD < BREW.multi_target.RFSBase
         end
 
         function obj = predict(obj, dt, varargin) 
+
+            p = inputParser;
+            p.KeepUnmatched = true;
+            p.parse(varargin{:})
             
-            obj.predict_prob_density(dt,varargin);
+            obj.predict_prob_density(dt,p.Unmatched);
 
             obj.Mix.addComponents(obj.birth_model.copy());
 
@@ -78,6 +82,10 @@ classdef PHD < BREW.multi_target.RFSBase
             % Matrix format: M x T where T is each point, and M is
             % dimension of measurement
 
+            p = inputParser;
+            p.KeepUnmatched = true;
+            p.parse(varargin{:})
+
             if ~isa(meas,'cell')
                 if obj.Mix.isExtendedTarget
                     % Clustering needs to happen
@@ -95,7 +103,7 @@ classdef PHD < BREW.multi_target.RFSBase
             undetected_mix.weights = (1 - obj.prob_detection) * undetected_mix.weights;
 
             % Correct the mixture for each measurement
-            obj.correct_prob_density(dt, meas_new, varargin);
+            obj.correct_prob_density(dt, meas_new, p.Unmatched);
 
             obj.Mix.addComponents(undetected_mix);
 
@@ -141,6 +149,11 @@ classdef PHD < BREW.multi_target.RFSBase
 
 
         function obj = correct_prob_density(obj, dt, meas, varargin)
+
+            p = inputParser;
+            p.KeepUnmatched = true;
+            p.parse(varargin{:})
+
             obj.Mix.weights = obj.prob_detection * obj.Mix.weights;
             dist = {};
             weights = [];
@@ -154,7 +167,7 @@ classdef PHD < BREW.multi_target.RFSBase
                         z_gate = meas{z};
                     end
                     if obj.filter_.gate_meas(obj.Mix.distributions{k}, z_gate, obj.gate_threshold)
-                        [dist{end+1},qz] = obj.filter_.correct(dt,meas{z},obj.Mix.distributions{k});
+                        [dist{end+1},qz] = obj.filter_.correct(dt,meas{z},obj.Mix.distributions{k},p.Unmatched);
                         w_lst(end+1) = qz * obj.Mix.weights(k);
                     end
                 end
@@ -166,10 +179,15 @@ classdef PHD < BREW.multi_target.RFSBase
         end
 
         function obj = predict_prob_density(obj,dt,varargin)
+
+            p = inputParser;
+            p.KeepUnmatched = true;
+            p.parse(varargin{:})
+
             % Predict the mixture probabilities
             for k = 1:length(obj.Mix)
                 obj.Mix.weights(k) = obj.Mix.weights(k) * obj.prob_survive;  
-                obj.Mix.distributions{k} = obj.filter_.predict(dt,obj.Mix.distributions{k});
+                obj.Mix.distributions{k} = obj.filter_.predict(dt,obj.Mix.distributions{k},p.Unmatched);
             end
 
         end

@@ -11,16 +11,14 @@ classdef GGIWEKF < BREW.filters.FiltersBase
         function nextDist = predict(obj, dt, prevDist, varargin)
             p = inputParser; 
             p.CaseSensitive = true;
+            p.KeepUnmatched = true;
             addParameter(p, 'forgetting_factor', 1);
-            addParameter(p, 'tau', 1);
-            addParameter(p,'u',0);
+            addParameter(p, 'tau', 1); 
             addParameter(p,'dyn_obj',[]); % adds capability to change dynamics model
             addParameter(p,'process_noise',[]); 
 
             % Parse known arguments
-            parse(p, varargin{:});
-
-            u = p.Results.u;
+            parse(p, varargin{:}); 
 
             dyn_obj = p.Results.dyn_obj;
             proc_noise = p.Results.process_noise;
@@ -33,10 +31,10 @@ classdef GGIWEKF < BREW.filters.FiltersBase
             prevIWshape = prevDist.IWshape; 
 
             if ~isempty(dyn_obj)
-                nextState = dyn_obj.propagateState(dt, prevState, 'u', u);
+                nextState = dyn_obj.propagateState(dt, prevState, p.Unmatched);
                 F =  dyn_obj.getStateMat(dt, prevState);
             elseif ~isempty(obj.dyn_obj_)
-                nextState = obj.dyn_obj_.propagateState(dt, prevState, 'u', u);
+                nextState = obj.dyn_obj_.propagateState(dt, prevState, p.Unmatched);
                 F =  obj.dyn_obj_.getStateMat(dt, prevState);
             end
             if ~isempty(proc_noise)
@@ -50,10 +48,17 @@ classdef GGIWEKF < BREW.filters.FiltersBase
             nextIWdof = 2*prevDist.d + 2 + exp(-dt / p.Results.tau) * (prevIWdof - 2*prevDist.d - 2); 
             nextIWshape = (nextIWdof - 2*prevDist.d - 2) * ...
                 (prevIWdof - 2*prevDist.d - 2)^-1 * ...
-                obj.dyn_obj_.propagate_extent(prevState, prevIWshape); % this last function computes M*V*M'
+                obj.dyn_obj_.propagate_extent(dt,prevState, prevIWshape); % this last function computes M*V*M'
 
             % Create the next distribution for GGIW
-            nextDist = BREW.distributions.GGIW(nextAlpha, nextBeta, nextState, nextCov, nextIWdof, nextIWshape);
+            nextDist = prevDist;
+            nextDist.alpha = nextAlpha;
+            nextDist.beta = nextBeta;
+            nextDist.mean = nextState;
+            nextDist.covariance = nextCov;
+            nextDist.IWdof = nextIWdof;
+            nextDist.IWshape = nextIWshape;
+            % nextDist = BREW.distributions.GGIW(nextAlpha, nextBeta, nextState, nextCov, nextIWdof, nextIWshape);
         
         end
         function [nextDist, likelihood] = correct(obj, dt, meas, prevDist, varargin) 
@@ -62,7 +67,10 @@ classdef GGIWEKF < BREW.filters.FiltersBase
             p.CaseSensitive = true;
             addParameter(p,'H',[]); % could be constant, could be function handle ie H = @(x) ...
             addParameter(p,'h',[]); % expected to be function handle ie h = @(x) ...
-            addParameter(p,'meas_noise',[]); 
+            addParameter(p,'scaling_parameter',1)
+            addParameter(p,'meas_noise',obj.measurement_noise); 
+            addParameter(p,'basis_tracking',0)
+            addParameter(p,'beta',0)
 
             % Parse known arguments
             parse(p, varargin{:});
@@ -70,6 +78,7 @@ classdef GGIWEKF < BREW.filters.FiltersBase
             h_input = p.Results.h;
             H_input = p.Results.H;
             meas_noise = p.Results.meas_noise;
+            rho = p.Results.scaling_parameter;
 
             prevAlpha = prevDist.alpha;
             prevBeta = prevDist.beta;
@@ -105,28 +114,43 @@ classdef GGIWEKF < BREW.filters.FiltersBase
 
             X_hat = prevIWshape / (prevIWdof - 2*d - 2);
 
+            sqrtXhat = obj.sqrtmDiag(X_hat);
+
             epsilon = mean_meas - est_meas;
 
             N = epsilon * epsilon';
 
-            if ~isempty(meas_noise)
-                S = H * prevCov * H' + X_hat / W + meas_noise;
-            else
-                S = H * prevCov * H' + X_hat / W + obj.measurement_noise;
-            end
+            R_hat = rho*X_hat + meas_noise;
 
-            K = prevCov * H' * S^-1;
+            sqrtRhat = obj.sqrtmDiag(R_hat);
+ 
+            S = H * prevCov * H' + R_hat / W;
 
-            N_hat = X_hat^(1/2) * S^(-1/2) * N * S^(-dt/2) * X_hat^(dt/2);
+            sqrtS = obj.sqrtmDiag(S); 
+
+            K =  prevCov * H' / S; 
+
+            sqrtXinvR = sqrtXhat/sqrtRhat; 
+            
+            N_hat = sqrtXinvR * N / (sqrtRhat') * sqrtXhat';
+            % Z_hat = sqrtS \ scatter_meas / (sqrtS'); 
 
             nextAlpha = prevAlpha + W;
-            nextBeta = prevBeta + 1;
+            nextBeta = prevBeta + 1; 
             nextState = prevState + K * epsilon;
             nextCov = prevCov - K * H * prevCov; 
+            nextCov = (nextCov + nextCov')/2; 
             nextIWdof = prevIWdof + W;
             nextIWshape = prevIWshape + N_hat + scatter_meas;
 
-            nextDist = BREW.distributions.GGIW(nextAlpha,nextBeta,nextState,nextCov,nextIWdof,nextIWshape); 
+            nextDist = prevDist.copy();
+            nextDist.alpha = nextAlpha;
+            nextDist.beta = nextBeta;
+            nextDist.mean = nextState;
+            nextDist.covariance = nextCov;
+            nextDist.IWdof = nextIWdof;
+            nextDist.IWshape = nextIWshape;
+            % nextDist = BREW.distributions.GGIW(nextAlpha,nextBeta,nextState,nextCov,nextIWdof,nextIWshape); 
             
             v0 = prevIWdof;   V0 = prevIWshape;
             v1 = nextIWdof;   V1 = nextIWshape;
@@ -145,6 +169,39 @@ classdef GGIWEKF < BREW.filters.FiltersBase
               - (W * log(pi) + log(W)) * d / 2;
             
             likelihood = exp(log_likelihood);
+
+            if p.Results.basis_tracking 
+                % Currently only works for 2D 
+                [u, s, ~] = svd(nextDist.IWshape);
+
+                if isempty(prevDist.basis) 
+                    nextDist.basis = u;
+                    nextDist.eigs = s;
+                else
+                    prev_u = prevDist.basis; 
+                    beta = p.Results.beta;
+
+                    A = u'*prev_u; 
+
+                    [~, I] = max(abs(A), [], 2);
+                    u = u(:, I);
+                    A = A(:, I);
+                
+                    % fix sign flips
+                    for k = 1:size(u,2)
+                        if A(k,k) < 0
+                            u(:,k) = -u(:,k);
+                        end
+                    end
+
+                    u = (1-beta) * u + beta*prev_u;
+
+                    nextDist.basis = u;
+                    nextDist.eigs = s;
+
+                    nextDist.IWshape = u * s * u';
+                end
+            end
         
         end
 
@@ -173,5 +230,17 @@ classdef GGIWEKF < BREW.filters.FiltersBase
             val = dist < gamma;
         end
     end 
+
+    methods (Access = private)
+        function sqrtP = sqrtmDiag(obj,P)
+            [Q, D] = eig((P+P')/2);
+            
+            d = diag(D);
+            d = max(real(d),eps(class(P)));
+            D = diag(d);
+            
+            sqrtP = real(Q*sqrt(D)*Q');
+            end
+    end
 
 end

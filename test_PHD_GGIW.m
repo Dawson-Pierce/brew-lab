@@ -2,7 +2,7 @@
 
 clear; clc; close all
 
-alphas = {50,50,50};
+alphas = {70,70,70};
 betas = {1,1,1}; 
 means = {[0; 10; 10; -0.75; -0.75; 0],[5; 20; 10; 0; -1; 0],[0; 12.5; 0; -0.5; 0; 1]}; 
 covariances = {eye(6), eye(6), eye(6)}; 
@@ -34,14 +34,14 @@ measurements = {};
 % initialize filter(s)
 H = [eye(3) zeros(3, length(means{1})-3)];
 R = 0.2 * eye(3); % Measurement noise
-process_noise = 0.01 * eye(length(means{1})); 
+process_noise = 0.1 * eye(length(means{1})); 
 inner_filter = BREW.filters.GGIWEKF('dyn_obj',target_motion, ...
     'H',H,'process_noise',process_noise,'measurement_noise', R);
 
 alpha = {10};
 beta = {1}; 
 mean = {[0; 15; 10; 0; 0; 0]}; 
-covariance = {diag([10,10,10,2,2,2])}; 
+covariance = {diag([15,15,15,2,2,2])}; 
 IWdof = {10}; 
 IWshape = {[1 0 0; 0 1 0; 0 0 1]}; 
 weight = [1];
@@ -56,8 +56,9 @@ birth_model = BREW.distributions.GGIWMixture( ...
     'weights', weight);
 
 phd = BREW.multi_target.PHD('filter',inner_filter, 'birth_model', birth_model,...
-    'prob_detection', 0.8, 'prob_survive', 0.8, 'max_terms',50, ...
-    'cluster_obj',BREW.clustering.DBSCAN_obj(3,5),'extract_threshold',0.5);
+    'prob_detection', 0.95, 'prob_survive', 0.95, 'max_terms',50, ...
+    'cluster_obj',BREW.clustering.DBSCAN_obj(3,5),'extract_threshold',0.4, ...
+    'clutter_rate',0);
 
 f = figure; 
 ax = axes;
@@ -79,16 +80,18 @@ for k = 1:length(t)
     end
     measurements{k} = truth.sample_measurements(); % Generate measurements from the truth distribution
 
-    scatter3(measurements{k}(1,:),measurements{k}(2,:),measurements{k}(3,:),'w*','SizeData',0.5)
+    scatter3(measurements{k}(1,:),measurements{k}(2,:),measurements{k}(3,:),'k*','SizeData',0.5)
 
     % PHD stuff
-    phd.predict(dt,{}); % Predict the state of the PHD filter 
+    phd.predict(dt); % Predict the state of the PHD filter 
 
     phd.correct(dt,measurements{k}); % Update the PHD filter with the new measurements
 
     est_mix = phd.cleanup();
 
     fprintf("timestep: %f \n",t(k)) 
+
+    disp(est_mix.weights)
 
     est_mix.plot_distributions([1,2,3]);
 
