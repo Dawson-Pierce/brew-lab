@@ -58,7 +58,7 @@ classdef TrajectoryGGIWEKF < BREW.filters.TrajectoryGaussianEKF
             nextIWdof = 2*prevDist.d + 2 + exp(-dt / p.Results.tau) * (prevIWdof - 2*prevDist.d - 2); 
             nextIWshape = (nextIWdof - 2*prevDist.d - 2) * ...
                 (prevIWdof - 2*prevDist.d - 2)^-1 * ...
-                obj.dyn_obj_.propagate_extent(prevState, prevIWshape); % this last function computes M*V*M'
+                obj.dyn_obj_.propagate_extent(dt,prevState, prevIWshape); % this last function computes M*V*M'
 
             nextDist = prevDist;
             nextDist.means = newMean;

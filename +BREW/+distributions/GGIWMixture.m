@@ -224,7 +224,7 @@ classdef GGIWMixture < BREW.distributions.BaseMixtureModel
                     if p ~= 0
                         epsj = 1e-9 * max(1, trace(Cjj)/size(Cjj,1));
                         Cjj = Cjj + epsj * eye(size(Cjj));
-                        R = chol(Cjj);
+                        R = chol(Cjj); 
                     end
             
                     % collect indices that fall within gate of jj
