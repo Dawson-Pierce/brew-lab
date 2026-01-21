@@ -126,12 +126,14 @@ classdef PHD < BREW.multi_target.RFSBase
     methods (Access = protected)
 
         function obj = prune(obj) 
-            idx = find(obj.Mix.weights < obj.prune_threshold); 
+            idx = find(obj.Mix.weights < obj.prune_threshold | isnan(obj.Mix.weights)); 
             obj.Mix.removeComponents(idx);
         end
 
         function obj = merge(obj)
-            obj.Mix.merge(obj.merge_threshold);
+            if obj.merge_threshold ~= 0
+                obj.Mix.merge(obj.merge_threshold);
+            end
         end
 
         function obj = cap(obj)

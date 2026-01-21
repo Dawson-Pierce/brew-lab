@@ -45,7 +45,7 @@ classdef GGIWEKF < BREW.filters.FiltersBase
 
             nextAlpha = prevAlpha / p.Results.forgetting_factor; 
             nextBeta = prevBeta / p.Results.forgetting_factor;
-            nextIWdof = 2*prevDist.d + 2 + exp(-dt / p.Results.tau) * (prevIWdof - 2*prevDist.d - 2); 
+            nextIWdof = 2*prevDist.d + 2 + exp(-dt / p.Results.tau) * (prevIWdof - 2*prevDist.d - 2) + 1e-3; 
             nextIWshape = (nextIWdof - 2*prevDist.d - 2) * ...
                 (prevIWdof - 2*prevDist.d - 2)^-1 * ...
                 obj.dyn_obj_.propagate_extent(dt,prevState, prevIWshape); % this last function computes M*V*M'
@@ -123,14 +123,16 @@ classdef GGIWEKF < BREW.filters.FiltersBase
             R_hat = rho*X_hat + meas_noise;
 
             sqrtRhat = obj.sqrtmDiag(R_hat);
+            sqrtRhat = 0.5 * (sqrtRhat' + sqrtRhat);
  
             S = H * prevCov * H' + R_hat / W;
 
-            sqrtS = obj.sqrtmDiag(S); 
+            % sqrtS = obj.sqrtmDiag(S); 
 
             K =  prevCov * H' / S; 
 
             sqrtXinvR = sqrtXhat/sqrtRhat; 
+            sqrtXinvR = 0.5 * (sqrtXinvR' + sqrtXinvR);
             
             N_hat = sqrtXinvR * N / (sqrtRhat') * sqrtXhat';
             % Z_hat = sqrtS \ scatter_meas / (sqrtS'); 
@@ -142,6 +144,8 @@ classdef GGIWEKF < BREW.filters.FiltersBase
             nextCov = (nextCov + nextCov')/2; 
             nextIWdof = prevIWdof + W;
             nextIWshape = prevIWshape + N_hat + scatter_meas;
+
+            nextIWshape = 0.5 * (nextIWshape' + nextIWshape);
 
             nextDist = prevDist.copy();
             nextDist.alpha = nextAlpha;
