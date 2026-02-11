@@ -1,4 +1,4 @@
-# Bayesian Recursive Estimation Workspace
+# Bayesian Recursive Estimation Workspace in MATLAB
 ----------------------------------------
 
 A custom MATLAB package for target tracking applications. 
