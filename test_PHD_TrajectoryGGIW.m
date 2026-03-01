@@ -9,7 +9,7 @@ truth.dist_type = "GGIW";
 truth.means = {[0; 10; 10; -0.75; -0.75; 0], [5; 20; 10; 0; -1; 0], [0; 12.5; 0; -0.5; 0; 1]};
 truth.covariances = {eye(6), eye(6), eye(6)};
 truth.weights = [1, 1, 1];
-truth.alphas = [50, 50, 50];
+truth.alphas = [70, 70, 70];
 truth.betas = [1, 1, 1];
 truth.vs = [10, 10, 10];
 truth.Vs = {[5 0 0; 0 5 0; 0 0 2], [5 0 0; 0 5 0; 0 0 2], [5 0 0; 0 5 0; 0 0 2]};
@@ -43,13 +43,13 @@ birth_model = BREW.models.TrajectoryGGIWMixture( ...
     'betas', {1}, ...
     'vs', {10}, ...
     'Vs', {[1 0 0; 0 1 0; 0 0 1]}, ...
-    'weights', [1]);
+    'weights', [0.01]);
 
 %% PHD setup
 
 phd = BREW.multi_target.PHD('filter', inner_filter, 'birth_model', birth_model, ...
-    'prob_detection', 0.8, 'prob_survive', 0.8, 'max_terms', 50, ...
-    'extract_threshold', 0.5);
+    'prob_detection', 0.95, 'prob_survive', 0.95, 'max_terms', 50, ...
+    'extract_threshold', 0.5,'clutter_rate', 1e-6, 'clutter_density', 1e-4);
 
 f = figure;
 ax = axes;
@@ -74,14 +74,12 @@ for k = 1:length(t)
     % Generate measurements from truth
     measurements{k} = truth.sample_measurements();
 
-    scatter3(measurements{k}(1,:), measurements{k}(2,:), measurements{k}(3,:), 'w*', 'SizeData', 0.5)
+    scatter3(measurements{k}(1,:), measurements{k}(2,:), measurements{k}(3,:), 'k.', 'SizeData', 0.5)
 
     % PHD filter
     phd.predict(dt);
     phd.correct(dt, measurements{k});
     est_mix = phd.cleanup();
-
-    fprintf("timestep: %f \n", t(k))
 
     est_mix.plot_distributions([1, 2, 3], 'ax', ax, 'window_color', 'r', 'window_width', 1.6);
 

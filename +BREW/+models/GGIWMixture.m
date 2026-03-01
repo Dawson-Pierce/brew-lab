@@ -6,6 +6,7 @@ classdef GGIWMixture < handle
     methods
         function obj = GGIWMixture(varargin)
             p = inputParser;
+            p.CaseSensitive = true;
             addParameter(p, 'means', {});
             addParameter(p, 'covariances', {});
             addParameter(p, 'alphas', {});
@@ -14,10 +15,13 @@ classdef GGIWMixture < handle
             addParameter(p, 'Vs', {});
             addParameter(p, 'weights', []);
             parse(p, varargin{:});
+            % MEX expects alphas/betas/vs as double arrays, not cell arrays
+            a = p.Results.alphas; if iscell(a), a = cell2mat(a); end
+            b = p.Results.betas;  if iscell(b), b = cell2mat(b); end
+            v = p.Results.vs;     if iscell(v), v = cell2mat(v); end
             obj.handle_ = brew_mex('create_mixture', 'GGIW', ...
                 p.Results.means, p.Results.covariances, ...
-                p.Results.alphas, p.Results.betas, ...
-                p.Results.vs, p.Results.Vs, ...
+                a, b, v, p.Results.Vs, ...
                 p.Results.weights);
         end
         function delete(obj)
