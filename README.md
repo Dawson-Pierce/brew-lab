@@ -7,6 +7,16 @@ This package holds general dynamics models, different distributions, and filters
 
 NOTE: This code is still in development and is in no way promised to perform to any specific standard. 
 
+## Getting Started:
+
+To get started, run the function
+
+```
+build_brew_mex()
+```
+
+After the compile is done, the wrapper should work as intended. 
+
 ## Example 1: 
 Gamma Gaussian Inverse Wishart applied to PHD filter for simulated measurements using the GGIW Mixture model. Output of test_PHD_GGIW.m. 
 
