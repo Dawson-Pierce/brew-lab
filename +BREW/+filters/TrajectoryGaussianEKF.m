@@ -1,172 +1,148 @@
-classdef TrajectoryGaussianEKF < BREW.filters.FiltersBase
-    % Extended Kalman Filter / Kalman Filter class for gaussian
-    % trajectories
-
-    properties
-        L_window % For efficient computing of trajectory matrices
+classdef TrajectoryGaussianEKF < handle
+    properties (SetAccess = private)
+        handle_ uint64
+        dist_type_ string = "TrajectoryGaussian"
     end
-
+    properties
+        dyn_obj_
+        H_
+        process_noise_
+        measurement_noise_
+        L_window
+    end
     methods
         function obj = TrajectoryGaussianEKF(varargin)
             p = inputParser;
-            p.CaseSensitive = true;
-            p.KeepUnmatched = true; 
-
-            addParameter(p,'L',50)
-
-            parse(p,varargin{:})
-            
-            obj@BREW.filters.FiltersBase(p.Unmatched);
-
+            addParameter(p, 'dyn_obj', []);
+            addParameter(p, 'process_noise', []);
+            addParameter(p, 'H', []);
+            addParameter(p, 'measurement_noise', []);
+            addParameter(p, 'L', 50);
+            parse(p, varargin{:});
+            R = p.Results.measurement_noise;
+            obj.dyn_obj_ = p.Results.dyn_obj;
+            obj.H_ = p.Results.H;
+            obj.process_noise_ = p.Results.process_noise;
+            obj.measurement_noise_ = R;
             obj.L_window = p.Results.L;
-
+            obj.handle_ = brew_mex('create_filter', 'TrajectoryGaussianEKF', ...
+                p.Results.dyn_obj.handle_, p.Results.process_noise, ...
+                p.Results.H, R, ...
+                p.Results.L);
         end
+
         function nextDist = predict(obj, dt, prevDist, varargin)
-            p = inputParser; 
-            p.CaseSensitive = true; 
-            p.KeepUnmatched   = true; 
-            addParameter(p,'dyn_obj',[]); % adds capability to change dynamics model
-            addParameter(p,'process_noise',[]); 
+            %PREDICT Trajectory Gaussian EKF predict on a single-component Mixture.
+            sd = prevDist.state_dim;
+            prevMean = prevDist.means{1};
+            window_size = numel(prevMean) / sd;
 
-            % Parse known arguments
-            parse(p, varargin{:}); 
-
-            dyn_obj = p.Results.dyn_obj;
-            proc_noise = p.Results.process_noise; 
-
-            if (prevDist.window_size < obj.L_window)
+            if window_size < obj.L_window
                 start_idx = 1;
             else
-                start_idx = prevDist.state_dim+1;
+                start_idx = sd + 1;
             end
 
-            prevState = prevDist.getLastState();
-            prevCov = prevDist.covariances(start_idx:end,start_idx:end); 
+            prevState = prevMean(end-sd+1:end);
+            prevCov = prevDist.covariances{1}(start_idx:end, start_idx:end);
 
-            if ~isempty(dyn_obj)
-                nextState = dyn_obj.propagateState(dt, prevState, p.Unmatched);
-                F =  dyn_obj.getStateMat(dt, prevState);
-            elseif ~isempty(obj.dyn_obj_)
-                nextState = obj.dyn_obj_.propagateState(dt, prevState, p.Unmatched);
-                F =  obj.dyn_obj_.getStateMat(dt, prevState);
-            end
+            nextState = obj.dyn_obj_.propagateState(dt, prevState);
+            F = obj.dyn_obj_.getStateMat(dt, prevState);
 
-            if (prevDist.window_size < obj.L_window)
-                F_dot = kron([zeros(1,prevDist.window_size-1), 1],F);
+            if window_size < obj.L_window
+                F_dot = kron([zeros(1, window_size-1), 1], F);
             else
-                F_dot = kron([zeros(1,obj.L_window-2), 1],F);
+                F_dot = kron([zeros(1, obj.L_window-2), 1], F);
             end
 
-            if isempty(proc_noise)
-                proc_noise = obj.process_noise;
-            end 
+            proc_noise = obj.process_noise_;
+            newCov = [prevCov, prevCov * F_dot'; ...
+                      F_dot * prevCov, F_dot * prevCov * F_dot' + proc_noise];
+            newMean = [prevMean(start_idx:end); nextState];
 
-            newCov = [prevCov, prevCov * F_dot'; F_dot * prevCov, F_dot * prevCov * F_dot' + proc_noise]; 
+            nextDist = BREW.models.Mixture();
+            nextDist.dist_type = "TrajectoryGaussian";
+            nextDist.state_dim = sd;
+            nextDist.means = {newMean};
+            nextDist.covariances = {newCov};
+            nextDist.weights = prevDist.weights;
+            nextDist.init_indices = prevDist.init_indices;
 
-            newMean = [prevDist.means(start_idx:end); nextState];
-
-            nextDist = prevDist;
-            nextDist.means = newMean;
-            nextDist.covariances = newCov;
-            nextDist.cov_history(:,:,end+1) = newCov((end-prevDist.state_dim+1):end,(end-prevDist.state_dim+1):end);
-
-            if (prevDist.window_size < obj.L_window)
-                nextDist.mean_history = nextDist.RearrangeStates();
-            else
-                nextDist.mean_history(:,end-obj.L_window+2:end+1) = nextDist.RearrangeStates();
-            end
-            nextDist.window_size = nextDist.window_size+1;
-        
-        end
-        function [nextDist, likelihood] = correct(obj, dt, meas, prevDist, varargin) 
-
-            p = inputParser; 
-            p.CaseSensitive = true;
-            addParameter(p,'H',[]); % could be constant, could be function handle ie H = @(x) ...
-            addParameter(p,'h',[]); % expected to be function handle ie h = @(x) ...
-            addParameter(p,'meas_noise',[]); 
-
-            % Parse known arguments
-            parse(p, varargin{:});
-
-            h_input = p.Results.h;
-            H_input = p.Results.H;
-            meas_noise = p.Results.meas_noise;
-
-            prevState = prevDist.getLastState();
-            prevCov = prevDist.covariances;  
-
-            if ~isempty(h_input)
-                est_meas = h_input(prevState);
-            else
-                est_meas = obj.estimate_measurement(prevState); 
-            end 
-
-            if ~isempty(H_input)
-                if isa(H_input,'function_handle')
-                    H = H_input(prevState);
+            % Update mean_histories
+            new_win_size = numel(newMean) / sd;
+            states_matrix = reshape(newMean, [sd, new_win_size]);
+            if ~isempty(prevDist.mean_histories) && ~isempty(prevDist.mean_histories{1})
+                prev_hist = prevDist.mean_histories{1};
+                if window_size < obj.L_window
+                    nextDist.mean_histories = {states_matrix};
                 else
-                    H = H_input;
+                    nextDist.mean_histories = {[prev_hist(:, 1:end-obj.L_window+1), states_matrix]};
                 end
             else
-                H = obj.getMeasurementMatrix(prevState);
-            end 
+                nextDist.mean_histories = {states_matrix};
+            end
+        end
 
-            if (prevDist.window_size - obj.L_window) < 0
-                H_dot = kron([zeros(1,prevDist.window_size-1), 1],H);
+        function [nextDist, likelihood] = correct(obj, dt, meas, prevDist, varargin)
+            %CORRECT Trajectory Gaussian EKF correct on a single-component Mixture.
+            sd = prevDist.state_dim;
+            prevMean = prevDist.means{1};
+            prevCov = prevDist.covariances{1};
+            window_size = numel(prevMean) / sd;
+
+            prevState = prevMean(end-sd+1:end);
+
+            H = obj.H_;
+            if isa(H, 'function_handle')
+                H = H(prevState);
+            end
+            est_meas = H * prevState;
+
+            if (window_size - obj.L_window) < 0
+                H_dot = kron([zeros(1, window_size-1), 1], H);
             else
-                H_dot = kron([zeros(1,obj.L_window-1), 1],H);
+                H_dot = kron([zeros(1, obj.L_window-1), 1], H);
             end
 
-            % H_dot = kron([zeros(1,prevDist.window_size-1), 1],H);
+            epsilon = meas - est_meas;
 
-            % est_meas = H_dot * prevDist.means;
+            S = H_dot * prevCov * H_dot' + obj.measurement_noise_;
+            K = prevCov * H_dot' / S;
 
-            epsilon = meas - est_meas; 
+            newMean = prevMean + K * epsilon;
+            newCov = prevCov - K * H_dot * prevCov;
 
-            if ~isempty(meas_noise)
-                S = H_dot * prevCov * H_dot' + meas_noise; 
+            nextDist = BREW.models.Mixture();
+            nextDist.dist_type = "TrajectoryGaussian";
+            nextDist.state_dim = sd;
+            nextDist.means = {newMean};
+            nextDist.covariances = {newCov};
+            nextDist.weights = prevDist.weights;
+            nextDist.init_indices = prevDist.init_indices;
+
+            % Update mean_histories from the corrected mean
+            states_matrix = reshape(newMean, [sd, window_size]);
+            if ~isempty(prevDist.mean_histories) && ~isempty(prevDist.mean_histories{1})
+                prev_hist = prevDist.mean_histories{1};
+                T_prev = size(prev_hist, 2);
+                T_win = size(states_matrix, 2);
+                frozen_len = T_prev - T_win;
+                if frozen_len > 0
+                    nextDist.mean_histories = {[prev_hist(:, 1:frozen_len), states_matrix]};
+                else
+                    nextDist.mean_histories = {states_matrix};
+                end
             else
-                S = H_dot * prevCov * H_dot' + obj.measurement_noise; 
+                nextDist.mean_histories = {states_matrix};
             end
 
-            K = prevCov * H_dot' * S^-1;
-
-            newCov = prevDist.covariances - K * H_dot * prevDist.covariances;
-
-            nextDist = prevDist; 
-            nextDist.means = prevDist.means + K * epsilon;
-            nextDist.covariances = newCov;
-            nextDist.cov_history(:,:,end) = newCov((end-prevDist.state_dim+1):end,(end-prevDist.state_dim+1):end);
-            
             likelihood = mvnpdf(meas, est_meas, S);
-        
         end
 
-        function val = gate_meas(obj, pred_dist, z, gamma)
-            state = pred_dist.getLastState();
-            P = pred_dist.getLastCov();
-            
-            est_z = obj.estimate_measurement(state);
-
-            H = obj.getMeasurementMatrix();
-
-            R = obj.measurement_noise;
-
-            Sj = H * P * H' + R; 
-            Sj= (Sj+ Sj')/2; 
-
-            Vs = chol(Sj); 
-            inv_sqrt_Sj= inv(Vs);
-
-            iSj= inv_sqrt_Sj*inv_sqrt_Sj'; 
-
-            nu = z - est_z;
-
-            dist= nu' * iSj * nu;
-
-            val = dist < gamma;
+        function delete(obj)
+            if obj.handle_ ~= 0
+                try brew_mex('destroy', obj.handle_); catch, end
+            end
         end
-    end 
-
+    end
 end

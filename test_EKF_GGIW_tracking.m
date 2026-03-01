@@ -2,14 +2,16 @@
 
 clear; close all; clc;
 
-% --- Truth Model Initialization (same as test_GGIW_extent_rotation) ---
-alpha = 100;
-beta = 1;
-meanVal = [0; 0; 0; 0; 0; 0];
-covVal = 0.5 * eye(length(meanVal));
-IWdof = 100;
-IWshape = [100 1 0.5; 1 100 0.3; 0.5 0.3 5];
-GGIW_truth = BREW.distributions.GGIW(alpha, beta, meanVal, covVal, IWdof, IWshape);
+% --- Truth Model Initialization ---
+truth = BREW.models.Mixture();
+truth.dist_type = "GGIW";
+truth.means = {[0; 0; 0; 0; 0; 0]};
+truth.covariances = {0.5 * eye(6)};
+truth.weights = 1;
+truth.alphas = 100;
+truth.betas = 1;
+truth.vs = 100;
+truth.Vs = {[100 1 0.5; 1 100 0.3; 0.5 0.3 5]};
 
 % --- Motion Model ---
 dt = 0.2;
@@ -17,15 +19,23 @@ num_steps = 20;
 motion = BREW.dynamics.Integrator_3D();
 
 % --- Measurement Model ---
-H = [eye(3), zeros(3, length(meanVal)-3)]; % Extract x, y, z
-R = 0.2 * eye(3); % Measurement noise
+H = [eye(3), zeros(3, 3)];
+R = 0.2 * eye(3);
 
 % --- EKF Initialization ---
-process_noise = 0.01 * eye(length(meanVal));
-GGIW_init = BREW.distributions.GGIW(alpha, beta, meanVal, covVal, IWdof, IWshape); % Same as truth for simplicity
-EKF = BREW.filters.GGIWEKF('dyn_obj', motion, 'H', H);
-EKF.setProcessNoise(process_noise);
-EKF.setMeasurementNoise(R);
+process_noise = 0.01 * eye(6);
+EKF = BREW.filters.GGIWEKF('dyn_obj', motion, 'H', H, ...
+    'process_noise', process_noise, 'measurement_noise', R);
+
+GGIW_est = BREW.models.Mixture();
+GGIW_est.dist_type = "GGIW";
+GGIW_est.means = truth.means;
+GGIW_est.covariances = truth.covariances;
+GGIW_est.weights = 1;
+GGIW_est.alphas = truth.alphas;
+GGIW_est.betas = truth.betas;
+GGIW_est.vs = truth.vs;
+GGIW_est.Vs = truth.Vs;
 
 % --- Plot Setup ---
 figure;
@@ -37,72 +47,69 @@ xlabel('X'); ylabel('Y'); zlabel('Z');
 title('EKF Tracking GGIW Truth Model');
 view(3);
 
-% --- Initial Plots ---
-GGIW_truth.plot_distribution(ax, 1:3, 0.95, 'w');
+truth.plot_distributions(1:3, 'ax', ax, 'colors', [1 1 1]);
 
 gifFilename = 'Tracker.gif';
 
 % --- Main Loop ---
-GGIW_est = GGIW_init;
 for k = 1:num_steps
     cla(ax);
+
     % --- Propagate Truth ---
-    GGIW_truth.IWshape = motion.propagate_extent(GGIW_truth.mean, GGIW_truth.IWshape);
+    d = size(truth.Vs{1}, 1);
+    truth.Vs{1} = motion.propagate_extent(dt, truth.means{1}, truth.Vs{1});
     if k == round(num_steps / 2)
-        GGIW_truth.mean = motion.propagateState(dt, GGIW_truth.mean, 'u' , rand(3,1));
+        truth.means{1} = motion.propagateState(dt, truth.means{1}, 'u', rand(3,1));
     else
-        GGIW_truth.mean = motion.propagateState(dt, GGIW_truth.mean);
+        truth.means{1} = motion.propagateState(dt, truth.means{1});
     end
-    
+
     % --- Generate Measurement ---
-    meas = GGIW_truth.sample_measurements([1 2 3]);
-    
+    meas = truth.sample_measurements([1 2 3]);
+
     % --- EKF Predict ---
-    GGIW_pred = EKF.predict(dt, GGIW_est, 'tau',1); 
+    GGIW_pred = EKF.predict(dt, GGIW_est, 'tau', 1);
 
     % --- EKF Correct ---
-    [GGIW_est, lik] = EKF.correct(dt, meas, GGIW_pred); 
+    [GGIW_est, lik] = EKF.correct(dt, meas, GGIW_pred);
 
     disp(lik)
-    
-    % --- Plot Truth Extent ---
-    % GGIW_truth.plot_distribution(ax, 1:3, 0.95, 'w');
+
     % --- Plot EKF Estimate Extent ---
-    GGIW_est.plot_distribution(ax, 1:3, 0.95, 'r');
+    GGIW_est.plot_distributions(1:3, 'ax', ax, 'colors', [1 0 0]);
+
     % --- Plot Measurements ---
     scatter3(meas(1,:), meas(2,:), meas(3,:), 0.5, 'k*'); hold on
+
     % --- Plot EKF Mean ---
-    plot3(ax, GGIW_est.mean(1), GGIW_est.mean(2), GGIW_est.mean(3), 'ro', 'MarkerFaceColor', 'r');
+    plot3(ax, GGIW_est.means{1}(1), GGIW_est.means{1}(2), GGIW_est.means{1}(3), ...
+        'ro', 'MarkerFaceColor', 'r');
+
     % --- Plot Truth Mean ---
-    plot3(ax, GGIW_truth.mean(1), GGIW_truth.mean(2), GGIW_truth.mean(3), 'wo', 'MarkerFaceColor', 'w');
+    plot3(ax, truth.means{1}(1), truth.means{1}(2), truth.means{1}(3), ...
+        'wo', 'MarkerFaceColor', 'w');
+
     xlabel('X'); ylabel('Y'); zlabel('Z');
     title(sprintf('EKF Tracking GGIW Truth (Step %d/%d)', k, num_steps));
 
     ax_extender = 20;
-    
-    axis(ax, [GGIW_truth.mean(1)-ax_extender  GGIW_truth.mean(1)+ax_extender ...
-        GGIW_truth.mean(2)-ax_extender  GGIW_truth.mean(2)+ax_extender ...
-        GGIW_truth.mean(3)-ax_extender  GGIW_truth.mean(3)+ax_extender]);
+    mu = truth.means{1};
+    axis(ax, [mu(1)-ax_extender mu(1)+ax_extender ...
+              mu(2)-ax_extender mu(2)+ax_extender ...
+              mu(3)-ax_extender mu(3)+ax_extender]);
 
     drawnow;
 
-    % capture the frame as an RGB image
+    % Capture GIF frame
     frame = getframe(gcf);
-    img   = frame2im(frame);
-
-    % convert to an indexed image with a fixed 256‐color map
+    img = frame2im(frame);
     [A, map] = rgb2ind(img, 256);
 
-    % write to GIF: first frame creates the file, subsequent frames append
     if k == 1
-        imwrite(A, map, gifFilename, 'gif', ...
-                'LoopCount', Inf, ...      % make it loop forever
-                'DelayTime', 0.1);         % seconds between frames
+        imwrite(A, map, gifFilename, 'gif', 'LoopCount', Inf, 'DelayTime', 0.1);
     else
-        imwrite(A, map, gifFilename, 'gif', ...
-                'WriteMode', 'append', ...
-                'DelayTime', 0.1);
+        imwrite(A, map, gifFilename, 'gif', 'WriteMode', 'append', 'DelayTime', 0.1);
     end
 
     pause(0.05);
-end 
+end

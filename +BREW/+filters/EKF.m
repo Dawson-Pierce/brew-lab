@@ -1,125 +1,90 @@
-classdef EKF < BREW.filters.FiltersBase
-    % Extended Kalman Filter / Kalman Filter class for gaussians
+classdef EKF < handle
+    properties (SetAccess = private)
+        handle_ uint64
+        dist_type_ string = "Gaussian"
+    end
+    properties
+        dyn_obj_
+        H_
+        process_noise_
+        measurement_noise_
+    end
+    methods
+        function obj = EKF(varargin)
+            p = inputParser;
+            addParameter(p, 'dyn_obj', []);
+            addParameter(p, 'process_noise', []);
+            addParameter(p, 'H', []);
+            addParameter(p, 'measurement_noise', []);
+            parse(p, varargin{:});
+            R = p.Results.measurement_noise;
+            obj.dyn_obj_ = p.Results.dyn_obj;
+            obj.H_ = p.Results.H;
+            obj.process_noise_ = p.Results.process_noise;
+            obj.measurement_noise_ = R;
+            obj.handle_ = brew_mex('create_filter', 'EKF', ...
+                p.Results.dyn_obj.handle_, p.Results.process_noise, ...
+                p.Results.H, R);
+        end
 
-    % most of the stuff for dynamics model and measurement model is 
-    % inherited, just update the predict and correct methodologies 
+        function setProcessNoise(obj, Q)
+            obj.process_noise_ = Q;
+        end
 
-    % dynamics model also has capability to be an input into the filter so
-    % we can change it mid tracking application
-
-    methods  
+        function setMeasurementNoise(obj, R)
+            obj.measurement_noise_ = R;
+        end
 
         function nextDist = predict(obj, dt, prevDist, varargin)
-            p = inputParser; 
-            p.CaseSensitive = true; 
-            addParameter(p,'dyn_obj',[]); % adds capability to change dynamics model
-            addParameter(p,'process_noise',[]); 
+            %PREDICT EKF predict step on a single-component Mixture.
+            prevState = prevDist.means{1};
+            prevCov = prevDist.covariances{1};
 
-            % Parse known arguments
-            parse(p, varargin{:}); 
+            nextState = obj.dyn_obj_.propagateState(dt, prevState);
+            F = obj.dyn_obj_.getStateMat(dt, prevState);
+            nextCov = F * prevCov * F' + obj.process_noise_;
 
-            dyn_obj = p.Results.dyn_obj;
-            proc_noise = p.Results.process_noise; 
-
-            prevState = prevDist.mean;
-            prevCov = prevDist.covariance; 
-
-            if ~isempty(dyn_obj)
-                nextState = dyn_obj.propagateState(dt, prevState);
-                F =  dyn_obj.getStateMat(dt, prevState);
-            elseif ~isempty(obj.dyn_obj_)
-                nextState = obj.dyn_obj_.propagateState(dt, prevState);
-                F =  obj.dyn_obj_.getStateMat(dt, prevState);
-            end
-            if ~isempty(proc_noise)
-                nextCov = F * prevCov * F' + proc_noise;
-            else
-                nextCov = F * prevCov * F' + obj.process_noise;
-            end 
-
-            nextDist = BREW.distributions.Gaussian(nextState, nextCov);
-        
+            nextDist = BREW.models.Mixture();
+            nextDist.dist_type = "Gaussian";
+            nextDist.means = {nextState};
+            nextDist.covariances = {nextCov};
+            nextDist.weights = prevDist.weights;
         end
-        function [nextDist, likelihood] = correct(obj, dt, meas, prevDist, varargin) 
 
-            p = inputParser; 
-            p.CaseSensitive = true;
-            addParameter(p,'H',[]); % could be constant, could be function handle ie H = @(x) ...
-            addParameter(p,'h',[]); % expected to be function handle ie h = @(x) ...
-            addParameter(p,'meas_noise',[]); 
+        function [nextDist, likelihood] = correct(obj, dt, meas, prevDist, varargin)
+            %CORRECT EKF correct step on a single-component Mixture.
+            prevState = prevDist.means{1};
+            prevCov = prevDist.covariances{1};
 
-            % Parse known arguments
-            parse(p, varargin{:});
-
-            h_input = p.Results.h;
-            H_input = p.Results.H;
-            meas_noise = p.Results.meas_noise;
-
-            prevState = prevDist.mean;
-            prevCov = prevDist.covariance;  
-
-            if ~isempty(h_input)
-                est_meas = h_input(prevState);
-            else
-                est_meas = obj.estimate_measurement(prevState);
-            end 
-
-            if ~isempty(H_input)
-                if isa(H_input,'function_handle')
-                    H = H_input(prevState);
-                else
-                    H = H_input;
-                end
-            else
-                H = obj.getMeasurementMatrix(prevState);
-            end 
-
+            H = obj.H_;
+            if isa(H, 'function_handle')
+                H = H(prevState);
+            end
+            est_meas = H * prevState;
             epsilon = meas - est_meas;
 
-            if ~isempty(meas_noise)
-                R = meas_noise; 
-            else
-                R = obj.measurement_noise; 
-            end
-
+            R = obj.measurement_noise_;
             S = H * prevCov * H' + R;
             S = 0.5 * (S + S');
             K = (prevCov * H') / S;
 
             nextState = prevState + K * epsilon;
             I = eye(length(prevState));
-            nextCov  = (I - K*H) * prevCov * (I - K*H)' + K * R * K'; 
+            nextCov = (I - K*H) * prevCov * (I - K*H)' + K * R * K';
 
-            nextDist = BREW.distributions.Gaussian(nextState,nextCov); 
-            
+            nextDist = BREW.models.Mixture();
+            nextDist.dist_type = "Gaussian";
+            nextDist.means = {nextState};
+            nextDist.covariances = {nextCov};
+            nextDist.weights = prevDist.weights;
+
             likelihood = mvnpdf(meas, est_meas, S);
-        
         end
 
-        function val = gate_meas(obj, pred_dist, z, gamma)
-            state = pred_dist.mean;
-            P = pred_dist.covariance;
-            
-            est_z = obj.estimate_measurement(state);
-
-            H = obj.getMeasurementMatrix();
-
-            R = obj.measurement_noise;
-
-            Sj = H * P * H' + R; 
-            Sj= (Sj+ Sj')/2; 
-
-            Vs = chol(Sj);  
-            inv_sqrt_Sj= inv(Vs);
-
-            iSj= inv_sqrt_Sj*inv_sqrt_Sj'; 
-
-            nu = z - est_z;
-
-            dist= nu' * iSj * nu;
-
-            val = dist < gamma;
+        function delete(obj)
+            if obj.handle_ ~= 0
+                try brew_mex('destroy', obj.handle_); catch, end
+            end
         end
-    end 
-
+    end
 end
