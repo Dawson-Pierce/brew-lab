@@ -15,7 +15,9 @@ To get started, run the function
 build_brew()
 ```
 
-After the compile is done, the wrapper should work as intended. A folder `+BREW` will be created automatically using `generate_mex.py`, and then +utils holds plotting and sampling methods specific for MATLAB for easy-to-run testing. 
+After the compile is done, the wrapper should work as intended. A folder `+BREW` will be created automatically using `generator_files/generate_mex.py`, and then `+utils` holds plotting and sampling methods specific for MATLAB for easy-to-run testing. 
+
+The `tests/` folder should ensure the wrapper is working while showing how to initialize the algorithms. 
 
 ## Adding New C++ Classes
 
