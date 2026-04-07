@@ -1,0 +1,169 @@
+// ============================================================
+// Object Store
+// ============================================================
+
+struct ObjEntry {
+    std::shared_ptr<void> ptr;
+    std::string type;
+    std::string dist_type;
+    std::string rfs_type;
+    int timestep = 0;
+};
+
+static std::map<uint64_t, ObjEntry> g_store;
+static uint64_t g_next_id = 1;
+
+static uint64_t store_obj(std::shared_ptr<void> ptr, const std::string& type,
+                           const std::string& dist_type = "",
+                           const std::string& rfs_type = "") {
+    uint64_t id = g_next_id++;
+    g_store[id] = {ptr, type, dist_type, rfs_type, 0};
+    return id;
+}
+
+template<typename T>
+static std::shared_ptr<T> get_obj(uint64_t id) {
+    auto it = g_store.find(id);
+    if (it == g_store.end())
+        mexErrMsgIdAndTxt("brew:badHandle", "Invalid object handle %llu.", id);
+    return std::static_pointer_cast<T>(it->second.ptr);
+}
+
+static ObjEntry& get_entry(uint64_t id) {
+    auto it = g_store.find(id);
+    if (it == g_store.end())
+        mexErrMsgIdAndTxt("brew:badHandle", "Invalid object handle %llu.", id);
+    return it->second;
+}
+
+static void cleanup_all() { g_store.clear(); }
+
+// ============================================================
+// MATLAB <-> C++ Conversion Helpers
+// ============================================================
+
+static std::string get_string(const mxArray* a) {
+    if (mxIsChar(a)) {
+        char* buf = mxArrayToUTF8String(a);
+        std::string s(buf);
+        mxFree(buf);
+        return s;
+    }
+    mxArray* tmp = nullptr;
+    mxArray* input = const_cast<mxArray*>(a);
+    if (mexCallMATLAB(1, &tmp, 1, &input, "char") == 0 && tmp && mxIsChar(tmp)) {
+        char* buf = mxArrayToUTF8String(tmp);
+        std::string s(buf);
+        mxFree(buf);
+        mxDestroyArray(tmp);
+        return s;
+    }
+    if (tmp) mxDestroyArray(tmp);
+    mexErrMsgIdAndTxt("brew:badArg", "Expected a string argument.");
+    return "";
+}
+
+static uint64_t get_handle(const mxArray* a) {
+    if (mxIsUint64(a)) return *static_cast<uint64_t*>(mxGetData(a));
+    return static_cast<uint64_t>(mxGetScalar(a));
+}
+
+static mxArray* make_handle(uint64_t h) {
+    mxArray* out = mxCreateNumericMatrix(1, 1, mxUINT64_CLASS, mxREAL);
+    *static_cast<uint64_t*>(mxGetData(out)) = h;
+    return out;
+}
+
+static Eigen::VectorXd to_eigen_vec(const mxArray* a) {
+    size_t n = mxGetNumberOfElements(a);
+    double* p = mxGetDoubles(a);
+    return Eigen::Map<Eigen::VectorXd>(p, static_cast<Eigen::Index>(n));
+}
+
+static Eigen::MatrixXd to_eigen_mat(const mxArray* a) {
+    size_t m = mxGetM(a);
+    size_t n = mxGetN(a);
+    double* p = mxGetDoubles(a);
+    return Eigen::Map<Eigen::MatrixXd>(p, static_cast<Eigen::Index>(m),
+                                        static_cast<Eigen::Index>(n));
+}
+
+static mxArray* from_eigen_vec(const Eigen::VectorXd& v) {
+    mxArray* a = mxCreateDoubleMatrix(v.size(), 1, mxREAL);
+    std::memcpy(mxGetDoubles(a), v.data(), v.size() * sizeof(double));
+    return a;
+}
+
+static mxArray* from_eigen_mat(const Eigen::MatrixXd& M) {
+    mxArray* a = mxCreateDoubleMatrix(M.rows(), M.cols(), mxREAL);
+    std::memcpy(mxGetDoubles(a), M.data(), M.size() * sizeof(double));
+    return a;
+}
+
+static double get_field_double(const mxArray* s, const char* name, double def) {
+    mxArray* f = mxGetField(s, 0, name);
+    return f ? mxGetScalar(f) : def;
+}
+
+static int get_field_int(const mxArray* s, const char* name, int def) {
+    return static_cast<int>(get_field_double(s, name, static_cast<double>(def)));
+}
+
+// ============================================================
+// RFS Operations (polymorphic via RFSBase)
+// ============================================================
+
+static void cmd_rfs_predict(uint64_t handle, double dt) {
+    auto& entry = get_entry(handle);
+    auto rfs = get_obj<multi_target::RFSBase>(handle);
+    entry.timestep++;
+    rfs->predict(entry.timestep, dt);
+}
+
+static void cmd_rfs_correct(uint64_t handle, const mxArray* meas_mx) {
+    auto rfs = get_obj<multi_target::RFSBase>(handle);
+    Eigen::MatrixXd meas;
+
+    if (mxIsEmpty(meas_mx)) {
+        meas.resize(1, 0);
+    } else {
+        size_t m = mxGetM(meas_mx);
+        size_t n = mxGetN(meas_mx);
+        if (m == 1 && n > 1) {
+            meas = to_eigen_mat(meas_mx);
+        } else if (n == 1 && m > 1) {
+            Eigen::VectorXd v = to_eigen_vec(meas_mx);
+            meas.resize(1, v.size());
+            meas.row(0) = v.transpose();
+        } else {
+            meas = to_eigen_mat(meas_mx);
+        }
+    }
+    rfs->correct(meas);
+}
+
+static void cmd_rfs_cleanup(uint64_t handle) {
+    auto rfs = get_obj<multi_target::RFSBase>(handle);
+    rfs->cleanup();
+}
+
+// ============================================================
+// Track history helper
+// ============================================================
+
+static mxArray* track_histories_to_matlab(
+        const std::map<int, std::vector<Eigen::VectorXd>>& histories) {
+    const char* fields[] = {"id", "states"};
+    size_t n = histories.size();
+    mxArray* s = mxCreateStructMatrix(1, n, 2, fields);
+    size_t i = 0;
+    for (const auto& [id, states] : histories) {
+        mxSetField(s, i, "id", mxCreateDoubleScalar(id));
+        mxArray* sc = mxCreateCellMatrix(1, states.size());
+        for (size_t j = 0; j < states.size(); ++j)
+            mxSetCell(sc, j, from_eigen_vec(states[j]));
+        mxSetField(s, i, "states", sc);
+        ++i;
+    }
+    return s;
+}

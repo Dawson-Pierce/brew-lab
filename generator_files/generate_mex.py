@@ -1,52 +1,8 @@
 #!/usr/bin/env python3
-"""
-Generate brew_mex.cpp from @mex-annotated C++ headers.
+"""Generate brew_mex.cpp and MATLAB wrappers from @mex-annotated C++ headers.
 
-Scans brew/include/brew/**/*.hpp for @mex comment blocks and emits
-the complete MEX gateway source file. Re-run whenever the C++ API changes.
-
-Usage:
-    python generate_mex.py
-    python generate_mex.py --output brew_mex.cpp --include-root brew/include
-
-Annotation reference
---------------------
-Dynamics:
-    // @mex dynamics
-    // @mex_name SingleIntegrator
-    // @mex_args dims:int, beta:double
-
-Models (basic):
-    // @mex model
-    // @mex_name Gaussian
-    // @mex_fields mean:vec, covariance:mat
-    // @mex_extract_extra basis:mat          (optional read-only extras)
-
-Models (trajectory wrapper):
-    // @mex model
-    // @mex_name TrajectoryGaussian
-    // @mex_trajectory Gaussian
-
-Filters:
-    // @mex filter
-    // @mex_name EKF
-    // @mex_dist Gaussian
-    // @mex_setters temporal_decay:scalar, forgetting_factor:scalar
-
-RFS filters:
-    // @mex rfs
-    // @mex_name PHD
-    // @mex_params prune_threshold:double:1e-4, merge_threshold:double:4.0
-    // @mex_init set_intensity
-    // @mex_has cardinality, track_histories, birth_weights
-    // @mex_optional_params poisson_cardinality:double
-
-Clustering:
-    // @mex clustering
-    // @mex_name DBSCAN
-    // @mex_args epsilon:double, min_pts:int
-
-Field types: vec (Eigen::VectorXd), mat (Eigen::MatrixXd), scalar/double, int
+Usage: python generate_mex.py [--output brew_mex.cpp] [--matlab-dir +BREW]
+See README or annotation blocks in headers for the @mex annotation reference.
 """
 
 import re
@@ -84,6 +40,9 @@ class ModelDef:
     is_trajectory: bool = False
     base_model: str = ""
     extract_extra: List[Field] = dfield(default_factory=list)
+    create_handle_fields: List[Tuple[str, str]] = dfield(default_factory=list)  # [(name, cpp_type)] — handle from store
+    create_mat_fields: List[Tuple[str, str]] = dfield(default_factory=list)    # [(name, wrap_type)] — mat→C++ wrapper
+    create_int_vec_fields: List[str] = dfield(default_factory=list)             # [name, ...]
 
 
 @dataclass
@@ -92,6 +51,7 @@ class FilterDef:
     header: str
     dist: str
     setters: List[Tuple[str, str]]
+    handle_setters: List[Tuple[str, str]] = dfield(default_factory=list)  # [(setter_name, cpp_type)]
 
 
 @dataclass
@@ -111,6 +71,16 @@ class ClusteringDef:
     name: str
     header: str
     args: List[Tuple[str, str]]
+
+
+@dataclass
+class IcpDef:
+    """ICP algorithm object stored in handle store."""
+    name: str
+    header: str
+    namespace: str                                    # C++ namespace (template_matching)
+    args: List[Tuple[str, str]]                       # constructor args: "clone:IcpBase", "mat", etc.
+    params: List[Tuple[str, str, str]] = dfield(default_factory=list)  # IcpParams fields
 
 
 # =============================================================================
@@ -154,7 +124,10 @@ def parse_args_str(s: str) -> List[Tuple[str, str]]:
         if not part:
             continue
         tokens = part.split(":")
-        args.append((tokens[0].strip(), tokens[1].strip()))
+        # Join everything after the name as the type (e.g., "clone:IcpBase")
+        name = tokens[0].strip()
+        type_str = ":".join(t.strip() for t in tokens[1:])
+        args.append((name, type_str))
     return args
 
 
@@ -199,6 +172,7 @@ def scan_headers(root: Path):
     filters: List[FilterDef] = []
     rfs_types: List[RFSDef] = []
     clustering: List[ClusteringDef] = []
+    icp_types: List[IcpDef] = []
 
     for hpp in sorted(root.rglob("*.hpp")):
         text = hpp.read_text(encoding="utf-8")
@@ -226,15 +200,23 @@ def scan_headers(root: Path):
                     else:
                         fields = parse_fields(tags.get("fields", ""))
                         extras = parse_fields(tags.get("extract_extra", ""))
+                        handle_fields = parse_args_str(tags.get("create_handle_fields", ""))
+                        mat_fields = parse_args_str(tags.get("create_mat_fields", ""))
+                        ivec_fields = [s.strip() for s in tags.get("create_int_vec_fields", "").split(",") if s.strip()]
                         models_list.append(ModelDef(
                             name=name, header=header,
                             cpp_type=f"models::{name}",
                             fields=fields, extract_extra=extras,
+                            create_handle_fields=handle_fields,
+                            create_mat_fields=mat_fields,
+                            create_int_vec_fields=ivec_fields,
                         ))
 
                 elif cat == "filter":
                     setters = parse_args_str(tags.get("setters", ""))
-                    filters.append(FilterDef(tags["name"], header, tags["dist"], setters))
+                    handle_setters = parse_args_str(tags.get("handle_setters", ""))
+                    filters.append(FilterDef(tags["name"], header, tags["dist"], setters,
+                                             handle_setters=handle_setters))
 
                 elif cat == "rfs":
                     params = parse_params_str(tags.get("params", ""))
@@ -254,197 +236,34 @@ def scan_headers(root: Path):
                     args = parse_args_str(tags.get("args", ""))
                     clustering.append(ClusteringDef(tags["name"], header, args))
 
-    return dynamics, models_list, filters, rfs_types, clustering
+                elif cat == "icp":
+                    ns = tags.get("namespace", "template_matching")
+                    args = parse_args_str(tags.get("args", ""))
+                    params = parse_params_str(tags.get("params", ""))
+                    icp_types.append(IcpDef(
+                        name=tags["name"], header=header, namespace=ns,
+                        args=args, params=params,
+                    ))
+
+    return dynamics, models_list, filters, rfs_types, clustering, icp_types
 
 
-# =============================================================================
-# Code generation — static sections
-# =============================================================================
+# Static C++ code lives in mex_static.cpp.in (object store, helpers, RFS ops, track history)
+_STATIC_TEMPLATE = None
 
-OBJECT_STORE = r"""
-// ============================================================
-// Object Store
-// ============================================================
-
-struct ObjEntry {
-    std::shared_ptr<void> ptr;
-    std::string type;
-    std::string dist_type;
-    std::string rfs_type;
-    int timestep = 0;
-};
-
-static std::map<uint64_t, ObjEntry> g_store;
-static uint64_t g_next_id = 1;
-
-static uint64_t store_obj(std::shared_ptr<void> ptr, const std::string& type,
-                           const std::string& dist_type = "",
-                           const std::string& rfs_type = "") {
-    uint64_t id = g_next_id++;
-    g_store[id] = {ptr, type, dist_type, rfs_type, 0};
-    return id;
-}
-
-template<typename T>
-static std::shared_ptr<T> get_obj(uint64_t id) {
-    auto it = g_store.find(id);
-    if (it == g_store.end())
-        mexErrMsgIdAndTxt("brew:badHandle", "Invalid object handle %llu.", id);
-    return std::static_pointer_cast<T>(it->second.ptr);
-}
-
-static ObjEntry& get_entry(uint64_t id) {
-    auto it = g_store.find(id);
-    if (it == g_store.end())
-        mexErrMsgIdAndTxt("brew:badHandle", "Invalid object handle %llu.", id);
-    return it->second;
-}
-
-static void cleanup_all() { g_store.clear(); }
-"""
-
-HELPERS = r"""
-// ============================================================
-// MATLAB <-> C++ Conversion Helpers
-// ============================================================
-
-static std::string get_string(const mxArray* a) {
-    if (mxIsChar(a)) {
-        char* buf = mxArrayToUTF8String(a);
-        std::string s(buf);
-        mxFree(buf);
-        return s;
-    }
-    mxArray* tmp = nullptr;
-    mxArray* input = const_cast<mxArray*>(a);
-    if (mexCallMATLAB(1, &tmp, 1, &input, "char") == 0 && tmp && mxIsChar(tmp)) {
-        char* buf = mxArrayToUTF8String(tmp);
-        std::string s(buf);
-        mxFree(buf);
-        mxDestroyArray(tmp);
-        return s;
-    }
-    if (tmp) mxDestroyArray(tmp);
-    mexErrMsgIdAndTxt("brew:badArg", "Expected a string argument.");
-    return "";
-}
-
-static uint64_t get_handle(const mxArray* a) {
-    if (mxIsUint64(a)) return *static_cast<uint64_t*>(mxGetData(a));
-    return static_cast<uint64_t>(mxGetScalar(a));
-}
-
-static mxArray* make_handle(uint64_t h) {
-    mxArray* out = mxCreateNumericMatrix(1, 1, mxUINT64_CLASS, mxREAL);
-    *static_cast<uint64_t*>(mxGetData(out)) = h;
-    return out;
-}
-
-static Eigen::VectorXd to_eigen_vec(const mxArray* a) {
-    size_t n = mxGetNumberOfElements(a);
-    double* p = mxGetDoubles(a);
-    return Eigen::Map<Eigen::VectorXd>(p, static_cast<Eigen::Index>(n));
-}
-
-static Eigen::MatrixXd to_eigen_mat(const mxArray* a) {
-    size_t m = mxGetM(a);
-    size_t n = mxGetN(a);
-    double* p = mxGetDoubles(a);
-    return Eigen::Map<Eigen::MatrixXd>(p, static_cast<Eigen::Index>(m),
-                                        static_cast<Eigen::Index>(n));
-}
-
-static mxArray* from_eigen_vec(const Eigen::VectorXd& v) {
-    mxArray* a = mxCreateDoubleMatrix(v.size(), 1, mxREAL);
-    std::memcpy(mxGetDoubles(a), v.data(), v.size() * sizeof(double));
-    return a;
-}
-
-static mxArray* from_eigen_mat(const Eigen::MatrixXd& M) {
-    mxArray* a = mxCreateDoubleMatrix(M.rows(), M.cols(), mxREAL);
-    std::memcpy(mxGetDoubles(a), M.data(), M.size() * sizeof(double));
-    return a;
-}
-
-static double get_field_double(const mxArray* s, const char* name, double def) {
-    mxArray* f = mxGetField(s, 0, name);
-    return f ? mxGetScalar(f) : def;
-}
-
-static int get_field_int(const mxArray* s, const char* name, int def) {
-    return static_cast<int>(get_field_double(s, name, static_cast<double>(def)));
-}
-"""
-
-RFS_OPERATIONS = r"""
-// ============================================================
-// RFS Operations (polymorphic via RFSBase)
-// ============================================================
-
-static void cmd_rfs_predict(uint64_t handle, double dt) {
-    auto& entry = get_entry(handle);
-    auto rfs = get_obj<multi_target::RFSBase>(handle);
-    entry.timestep++;
-    rfs->predict(entry.timestep, dt);
-}
-
-static void cmd_rfs_correct(uint64_t handle, const mxArray* meas_mx) {
-    auto rfs = get_obj<multi_target::RFSBase>(handle);
-    Eigen::MatrixXd meas;
-
-    if (mxIsEmpty(meas_mx)) {
-        meas.resize(1, 0);
-    } else {
-        size_t m = mxGetM(meas_mx);
-        size_t n = mxGetN(meas_mx);
-        if (m == 1 && n > 1) {
-            meas = to_eigen_mat(meas_mx);
-        } else if (n == 1 && m > 1) {
-            Eigen::VectorXd v = to_eigen_vec(meas_mx);
-            meas.resize(1, v.size());
-            meas.row(0) = v.transpose();
-        } else {
-            meas = to_eigen_mat(meas_mx);
-        }
-    }
-    rfs->correct(meas);
-}
-
-static void cmd_rfs_cleanup(uint64_t handle) {
-    auto rfs = get_obj<multi_target::RFSBase>(handle);
-    rfs->cleanup();
-}
-"""
-
-TRACK_HISTORY_HELPER = r"""
-// ============================================================
-// Track history helper
-// ============================================================
-
-static mxArray* track_histories_to_matlab(
-        const std::map<int, std::vector<Eigen::VectorXd>>& histories) {
-    const char* fields[] = {"id", "states"};
-    size_t n = histories.size();
-    mxArray* s = mxCreateStructMatrix(1, n, 2, fields);
-    size_t i = 0;
-    for (const auto& [id, states] : histories) {
-        mxSetField(s, i, "id", mxCreateDoubleScalar(id));
-        mxArray* sc = mxCreateCellMatrix(1, states.size());
-        for (size_t j = 0; j < states.size(); ++j)
-            mxSetCell(sc, j, from_eigen_vec(states[j]));
-        mxSetField(s, i, "states", sc);
-        ++i;
-    }
-    return s;
-}
-"""
+def _load_static():
+    global _STATIC_TEMPLATE
+    if _STATIC_TEMPLATE is None:
+        p = Path(__file__).parent / "mex_static.cpp.in"
+        _STATIC_TEMPLATE = p.read_text(encoding="utf-8")
+    return _STATIC_TEMPLATE
 
 
 # =============================================================================
 # Code generation — dynamic sections
 # =============================================================================
 
-def gen_includes(dynamics, models_list, filters, rfs_types, clustering):
+def gen_includes(dynamics, models_list, filters, rfs_types, clustering, icp_types):
     lines = [
         "// brew_mex.cpp — Auto-generated MEX gateway. DO NOT EDIT BY HAND.",
         "// Re-generate with: python generate_mex.py",
@@ -476,6 +295,8 @@ def gen_includes(dynamics, models_list, filters, rfs_types, clustering):
         headers.add(r.header)
     for c in clustering:
         headers.add(c.header)
+    for ic in icp_types:
+        headers.add(ic.header)
     # Always include mixture and bernoulli
     headers.add("brew/models/mixture.hpp")
     headers.add("brew/models/bernoulli.hpp")
@@ -549,6 +370,133 @@ def gen_clustering_creation(clustering):
     return "\n".join(lines)
 
 
+def _gen_obj_arg(aname, atype, idx, namespace):
+    """Generate C++ extraction code for an object constructor arg."""
+    if ":" in atype:
+        mode, cpp_type = atype.split(":", 1)
+        full = f"{namespace}::{cpp_type}"
+        if mode == "clone":
+            return (f"    auto {aname} = get_obj<{full}>(get_handle(prhs[{idx}]))->clone();",
+                    f"std::move({aname})")
+        elif mode == "deref":
+            return (f"    auto {aname}_ptr = get_obj<{full}>(get_handle(prhs[{idx}]));",
+                    f"*{aname}_ptr")
+        else:  # shared
+            return (f"    auto {aname} = get_obj<{full}>(get_handle(prhs[{idx}]));",
+                    aname)
+    elif atype == "mat":
+        return (f"    Eigen::MatrixXd {aname} = to_eigen_mat(prhs[{idx}]);", aname)
+    elif atype == "mat_pc":
+        # Raw matrix → temporary PointCloud
+        return (f"    {namespace}::PointCloud {aname}(to_eigen_mat(prhs[{idx}]));", aname)
+    elif atype == "vec":
+        return (f"    Eigen::VectorXd {aname} = to_eigen_vec(prhs[{idx}]);", aname)
+    elif atype == "int":
+        return (f"    int {aname} = static_cast<int>(mxGetScalar(prhs[{idx}]));", aname)
+    else:
+        return (f"    double {aname} = mxGetScalar(prhs[{idx}]);", aname)
+
+
+def gen_icp_creation(icp_types):
+    """Generate creation functions for ICP algorithm objects."""
+    if not icp_types:
+        return ""
+    ns = icp_types[0].namespace
+    lines = [
+        "",
+        "// ============================================================",
+        "// ICP Creation",
+        "// ============================================================",
+        "",
+        f"static void configure_icp_params({ns}::IcpBase& icp, const mxArray* p) {{",
+        f"    {ns}::IcpParams params;",
+    ]
+    # Use params from the first ICP type (all share the same IcpParams struct)
+    first_with_params = next((ic for ic in icp_types if ic.params), None)
+    if first_with_params:
+        for pname, ptype, pdefault in first_with_params.params:
+            if ptype == "int":
+                lines.append(f'    params.{pname} = get_field_int(p, "{pname}", {pdefault});')
+            elif ptype == "bool":
+                lines.append(f'    params.{pname} = get_field_double(p, "{pname}", {pdefault}) != 0;')
+            else:
+                lines.append(f'    params.{pname} = get_field_double(p, "{pname}", {pdefault});')
+    lines.append("    icp.set_params(params);")
+    lines.append("}")
+
+    for ic in icp_types:
+        sn = to_snake(ic.name)
+        lines.append("")
+        lines.append(f"static uint64_t cmd_create_{sn}(int nrhs, const mxArray* prhs[]) {{")
+
+        # Constructor args
+        extractions = []
+        ctor_args = []
+        for j, (aname, atype) in enumerate(ic.args):
+            idx = 1 + j
+            extract, expr = _gen_obj_arg(aname, atype, idx, ns)
+            extractions.append(extract)
+            ctor_args.append(expr)
+
+        for ext in extractions:
+            lines.append(ext)
+
+        if ctor_args:
+            astr = ", ".join(ctor_args)
+            lines.append(f"    auto obj = std::make_shared<{ns}::{ic.name}>({astr});")
+        else:
+            lines.append(f"    auto obj = std::make_shared<{ns}::{ic.name}>();")
+
+        # Apply IcpParams from optional struct arg
+        cfg_idx = 1 + len(ic.args)
+        lines.append(f"    if (nrhs > {cfg_idx} && mxIsStruct(prhs[{cfg_idx}]))")
+        lines.append(f"        configure_icp_params(*obj, prhs[{cfg_idx}]);")
+
+        lines.append(f'    return store_obj(obj, "{ic.name}");')
+        lines.append("}")
+    return "\n".join(lines)
+
+
+def gen_icp_operations(icp_types):
+    """Generate icp_align MEX command."""
+    if not icp_types:
+        return ""
+    ns = icp_types[0].namespace
+
+    return f"""
+// ============================================================
+// ICP Operations
+// ============================================================
+
+static mxArray* cmd_icp_align(int nrhs, const mxArray* prhs[]) {{
+    auto icp = get_obj<{ns}::IcpBase>(get_handle(prhs[1]));
+
+    // Source and target are raw d×N point matrices
+    {ns}::PointCloud src(to_eigen_mat(prhs[2]));
+    {ns}::PointCloud tgt(to_eigen_mat(prhs[3]));
+
+    Eigen::Matrix3d R_init = Eigen::Matrix3d::Identity();
+    Eigen::Vector3d t_init = Eigen::Vector3d::Zero();
+    if (nrhs > 4 && !mxIsEmpty(prhs[4])) R_init = to_eigen_mat(prhs[4]);
+    if (nrhs > 5 && !mxIsEmpty(prhs[5])) t_init = to_eigen_vec(prhs[5]);
+
+    auto result = icp->align(src, tgt, R_init, t_init);
+
+    const char* fields[] = {{"rotation", "translation", "rmse",
+                             "log_likelihood", "inlier_ratio", "iterations", "converged"}};
+    mxArray* s = mxCreateStructMatrix(1, 1, 7, fields);
+    mxSetField(s, 0, "rotation", from_eigen_mat(result.rotation));
+    mxSetField(s, 0, "translation", from_eigen_vec(result.translation));
+    mxSetField(s, 0, "rmse", mxCreateDoubleScalar(result.rmse));
+    mxSetField(s, 0, "log_likelihood", mxCreateDoubleScalar(result.log_likelihood));
+    mxSetField(s, 0, "inlier_ratio", mxCreateDoubleScalar(result.inlier_ratio));
+    mxSetField(s, 0, "iterations", mxCreateDoubleScalar(result.iterations));
+    mxSetField(s, 0, "converged", mxCreateLogicalScalar(result.converged));
+    return s;
+}}
+"""
+
+
 def gen_filter_creation(filters_list):
     lines = [
         "",
@@ -577,12 +525,25 @@ def gen_filter_creation(filters_list):
         lines.append("        f->set_process_noise(Q);")
         lines.append("        f->set_measurement_jacobian(H);")
         lines.append("        f->set_measurement_noise(R);")
-        for j, (sname, stype) in enumerate(f.setters):
-            idx = 6 + j
+        next_idx = 6
+        for sname, stype in f.setters:
+            idx = next_idx
+            next_idx += 1
             if stype == "int":
                 lines.append(f"        if (nrhs > {idx}) f->set_{sname}(static_cast<int>(mxGetScalar(prhs[{idx}])));")
+            elif stype == "mat":
+                lines.append(f"        if (nrhs > {idx}) f->set_{sname}(to_eigen_mat(prhs[{idx}]));")
+            elif stype == "vec":
+                lines.append(f"        if (nrhs > {idx}) f->set_{sname}(to_eigen_vec(prhs[{idx}]));")
             else:
                 lines.append(f"        if (nrhs > {idx}) f->set_{sname}(mxGetScalar(prhs[{idx}]));")
+        for sname, cpp_type in f.handle_setters:
+            idx = next_idx
+            next_idx += 1
+            lines.append(f"        if (nrhs > {idx}) {{")
+            lines.append(f"            auto {sname}_obj = get_obj<template_matching::{cpp_type}>(get_handle(prhs[{idx}]));")
+            lines.append(f"            f->set_{sname}({sname}_obj);")
+            lines.append(f"        }}")
         lines.append(f'        return store_obj(f, "{f.name}", "{f.dist}");')
         lines.append("    }")
     lines.append("    else {")
@@ -600,7 +561,7 @@ def _gen_basic_mixture_create(model):
     lines = []
     lines.append(f"static uint64_t {fn}(int nrhs, const mxArray* prhs[]) {{")
 
-    # Map prhs indices to fields: [1]=dist_type, [2..]=fields, last=weights
+    # Map prhs indices: [1]=dist_type, [2..]=standard fields, handle fields, int_vec fields, weights
     idx = 2
     decls = []
     for f in model.fields:
@@ -608,6 +569,15 @@ def _gen_basic_mixture_create(model):
             decls.append(f"    const mxArray* {f.name}_cell = prhs[{idx}];")
         elif f.type == "scalar":
             decls.append(f"    const mxArray* {f.name}_arr = prhs[{idx}];")
+        idx += 1
+    for hname, _ in model.create_handle_fields:
+        decls.append(f"    const mxArray* {hname}_cell = prhs[{idx}];")
+        idx += 1
+    for mname, _ in model.create_mat_fields:
+        decls.append(f"    const mxArray* {mname}_cell = prhs[{idx}];")
+        idx += 1
+    for ivname in model.create_int_vec_fields:
+        decls.append(f"    const mxArray* {ivname}_cell = prhs[{idx}];")
         idx += 1
     weight_idx = idx
     n_required = weight_idx + 1
@@ -617,7 +587,6 @@ def _gen_basic_mixture_create(model):
     lines.extend(decls)
     lines.append(f"    const mxArray* weights = prhs[{weight_idx}];")
 
-    # Count and weight pointer
     first_cell = next((f for f in model.fields if f.type in ("vec", "mat")), None)
     if first_cell:
         lines.append(f"    size_t n = mxGetNumberOfElements({first_cell.name}_cell);")
@@ -645,6 +614,27 @@ def _gen_basic_mixture_create(model):
         elif f.type == "scalar":
             ctor_args.append(f"p_{f.name}[i]")
 
+    # Handle fields (shared_ptr from object store)
+    for hname, htype in model.create_handle_fields:
+        lines.append(f"        auto {hname} = get_obj<template_matching::{htype}>(")
+        lines.append(f"            static_cast<uint64_t>(mxGetScalar(mxGetCell({hname}_cell, i))));")
+        ctor_args.append(hname)
+
+    # Mat-wrapped fields (MATLAB matrix → C++ wrapper object, e.g., PointCloud)
+    for mname, wrap_type in model.create_mat_fields:
+        lines.append(f"        auto {mname} = std::make_shared<template_matching::{wrap_type}>(")
+        lines.append(f"            to_eigen_mat(mxGetCell({mname}_cell, i)));")
+        ctor_args.append(mname)
+
+    # Int vector fields (MATLAB double array → std::vector<int>, 1-based to 0-based)
+    for ivname in model.create_int_vec_fields:
+        lines.append(f"        const mxArray* {ivname}_mx = mxGetCell({ivname}_cell, i);")
+        lines.append(f"        std::vector<int> {ivname};")
+        lines.append(f"        {{ double* pp = mxGetDoubles({ivname}_mx);")
+        lines.append(f"          for (size_t jj = 0; jj < mxGetNumberOfElements({ivname}_mx); ++jj)")
+        lines.append(f"              {ivname}.push_back(static_cast<int>(pp[jj]) - 1); }}")
+        ctor_args.append(ivname)
+
     args_str = ", ".join(ctor_args)
     lines.append(f"        mix->add_component(")
     lines.append(f"            std::make_unique<{model.cpp_type}>({args_str}), w[i]);")
@@ -661,6 +651,7 @@ def _gen_trajectory_mixture_create(model, model_map):
     lines = []
     lines.append(f"static uint64_t {fn}(int nrhs, const mxArray* prhs[]) {{")
 
+    # Collect all prhs declarations — same order as _gen_basic_mixture_create
     idx = 2
     decls = []
     for f in base.fields:
@@ -668,6 +659,15 @@ def _gen_trajectory_mixture_create(model, model_map):
             decls.append(f"    const mxArray* {f.name}_cell = prhs[{idx}];")
         elif f.type == "scalar":
             decls.append(f"    const mxArray* {f.name}_arr = prhs[{idx}];")
+        idx += 1
+    for hname, _ in base.create_handle_fields:
+        decls.append(f"    const mxArray* {hname}_cell = prhs[{idx}];")
+        idx += 1
+    for mname, _ in base.create_mat_fields:
+        decls.append(f"    const mxArray* {mname}_cell = prhs[{idx}];")
+        idx += 1
+    for ivname in base.create_int_vec_fields:
+        decls.append(f"    const mxArray* {ivname}_cell = prhs[{idx}];")
         idx += 1
     weight_idx = idx
     n_required = weight_idx + 1
@@ -703,6 +703,27 @@ def _gen_trajectory_mixture_create(model, model_map):
             base_ctor.append(f.name)
         elif f.type == "scalar":
             base_ctor.append(f"p_{f.name}[i]")
+
+    # Handle fields (shared_ptr from object store)
+    for hname, htype in base.create_handle_fields:
+        lines.append(f"        auto {hname} = get_obj<template_matching::{htype}>(")
+        lines.append(f"            static_cast<uint64_t>(mxGetScalar(mxGetCell({hname}_cell, i))));")
+        base_ctor.append(hname)
+
+    # Mat-wrapped fields (e.g., PointCloud from matrix)
+    for mname, wrap_type in base.create_mat_fields:
+        lines.append(f"        auto {mname} = std::make_shared<template_matching::{wrap_type}>(")
+        lines.append(f"            to_eigen_mat(mxGetCell({mname}_cell, i)));")
+        base_ctor.append(mname)
+
+    # Int vector fields (1-based to 0-based)
+    for ivname in base.create_int_vec_fields:
+        lines.append(f"        const mxArray* {ivname}_mx = mxGetCell({ivname}_cell, i);")
+        lines.append(f"        std::vector<int> {ivname};")
+        lines.append(f"        {{ double* pp = mxGetDoubles({ivname}_mx);")
+        lines.append(f"          for (size_t jj = 0; jj < mxGetNumberOfElements({ivname}_mx); ++jj)")
+        lines.append(f"              {ivname}.push_back(static_cast<int>(pp[jj]) - 1); }}")
+        base_ctor.append(ivname)
 
     lines.append("        int state_dim = static_cast<int>(mean.size());")
     base_args = ", ".join(base_ctor)
@@ -1006,132 +1027,83 @@ def gen_extraction(models_list, model_map, rfs_types):
     return "\n".join(lines)
 
 
-# ---------- Birth weights ----------
+# ---------- RFS feature dispatchers (birth_weights, cardinality, track_histories) ----------
+
+def _gen_rfs_feature(models_list, rfs_types, flag, title, tmpl_name, tmpl_sig,
+                     tmpl_ret, inner_call, cmd_name, cmd_sig, cmd_ret,
+                     default_ret, cmd_arg_fwd, error_id=None):
+    """Generate a double-dispatch (rfs_type × dist_type) feature block."""
+    subset = [r for r in rfs_types if getattr(r, flag)]
+    if not subset:
+        return ""
+    L = ["", f"// {title}", ""]
+    # Template dispatch on rfs_type
+    L.append(f"template<typename T>\nstatic {tmpl_ret} {tmpl_name}({tmpl_sig}) {{")
+    for i, r in enumerate(subset):
+        kw = "if" if i == 0 else "else if"
+        L.append(f'    {kw} (rfs_type == "{r.name}") {{')
+        L.append(f"        auto& r = static_cast<multi_target::{r.name}<T>&>(*base);")
+        L.append(f"        {inner_call}")
+        L.append("    }")
+    if error_id:
+        L.append(f"    else {{ mexErrMsgIdAndTxt(\"{error_id}\",")
+        L.append(f'        \"{title} not supported for RFS type: %s\", rfs_type.c_str()); }}')
+    if default_ret:
+        L.append(f"    {default_ret}")
+    L += ["}", ""]
+    # Command dispatch on dist_type
+    L.append(f"static {cmd_ret} {cmd_name}({cmd_sig}) {{")
+    L.append("    auto& entry = get_entry(handle);")
+    L.append("    auto rfs = get_obj<multi_target::RFSBase>(handle);")
+    for i, m in enumerate(models_list):
+        kw = "if" if i == 0 else "else if"
+        L.append(f'    {kw} (entry.dist_type == "{m.name}")')
+        L.append(f"        {cmd_arg_fwd.format(cpp=m.cpp_type)}")
+    if default_ret:
+        L.append(f"    {default_ret}")
+    else:
+        L.append('    else mexErrMsgIdAndTxt("brew:badDist", "Unknown dist type: %s", entry.dist_type.c_str());')
+    L.append("}")
+    return "\n".join(L)
+
 
 def gen_birth_weights(models_list, rfs_types):
-    bw_rfs = [r for r in rfs_types if r.has_birth_weights]
-    if not bw_rfs:
-        return ""
+    return _gen_rfs_feature(models_list, rfs_types,
+        flag="has_birth_weights", title="Birth Weight Setters",
+        tmpl_name="set_birth_weights_for_rfs",
+        tmpl_sig="multi_target::RFSBase* base, const std::string& rfs_type, const Eigen::VectorXd& weights",
+        tmpl_ret="void", inner_call="r.set_birth_weights(weights);",
+        cmd_name="cmd_rfs_set_birth_weights",
+        cmd_sig="uint64_t handle, const Eigen::VectorXd& weights", cmd_ret="void",
+        default_ret=None, error_id="brew:unsupported",
+        cmd_arg_fwd="set_birth_weights_for_rfs<{cpp}>(rfs.get(), entry.rfs_type, weights);")
 
-    lines = [
-        "",
-        "// ============================================================",
-        "// Birth Weight Setters",
-        "// ============================================================",
-        "",
-        "template<typename T>",
-        "static void set_birth_weights_for_rfs(multi_target::RFSBase* base,",
-        "                                       const std::string& rfs_type,",
-        "                                       const Eigen::VectorXd& weights) {",
-    ]
-    for i, rfs in enumerate(bw_rfs):
-        kw = "if" if i == 0 else "else if"
-        lines.append(f'    {kw} (rfs_type == "{rfs.name}") {{')
-        lines.append(f"        auto& r = static_cast<multi_target::{rfs.name}<T>&>(*base);")
-        lines.append("        r.set_birth_weights(weights);")
-        lines.append("    }")
-    lines.append("    else {")
-    lines.append('        mexErrMsgIdAndTxt("brew:unsupported",')
-    lines.append('            "set_birth_weights not supported for RFS type: %s", rfs_type.c_str());')
-    lines.append("    }")
-    lines.append("}")
-    lines.append("")
-
-    # Dispatch on dist_type
-    lines.append("static void cmd_rfs_set_birth_weights(uint64_t handle, const Eigen::VectorXd& weights) {")
-    lines.append("    auto& entry = get_entry(handle);")
-    lines.append("    auto rfs = get_obj<multi_target::RFSBase>(handle);")
-    for i, m in enumerate(models_list):
-        kw = "if" if i == 0 else "else if"
-        lines.append(f'    {kw} (entry.dist_type == "{m.name}")')
-        lines.append(f"        set_birth_weights_for_rfs<{m.cpp_type}>(rfs.get(), entry.rfs_type, weights);")
-    lines.append("    else")
-    lines.append('        mexErrMsgIdAndTxt("brew:badDist", "Unknown dist type: %s", entry.dist_type.c_str());')
-    lines.append("}")
-    return "\n".join(lines)
-
-
-# ---------- Cardinality ----------
 
 def gen_cardinality(models_list, rfs_types):
-    card_rfs = [r for r in rfs_types if r.has_cardinality]
-    if not card_rfs:
-        return ""
+    return _gen_rfs_feature(models_list, rfs_types,
+        flag="has_cardinality", title="Cardinality Getters",
+        tmpl_name="get_cardinality_dispatch",
+        tmpl_sig="multi_target::RFSBase* base, const std::string& rfs_type",
+        tmpl_ret="mxArray*", inner_call="return from_eigen_vec(r.cardinality());",
+        cmd_name="cmd_rfs_get_cardinality", cmd_sig="uint64_t handle",
+        cmd_ret="mxArray*", default_ret="return mxCreateDoubleMatrix(0, 0, mxREAL);",
+        cmd_arg_fwd="return get_cardinality_dispatch<{cpp}>(rfs.get(), entry.rfs_type);")
 
-    lines = [
-        "",
-        "// ============================================================",
-        "// Cardinality Getters",
-        "// ============================================================",
-        "",
-        "template<typename T>",
-        "static mxArray* get_cardinality_dispatch(multi_target::RFSBase* base,",
-        "                                          const std::string& rfs_type) {",
-    ]
-    for i, rfs in enumerate(card_rfs):
-        kw = "if" if i == 0 else "else if"
-        lines.append(f'    {kw} (rfs_type == "{rfs.name}") {{')
-        lines.append(f"        auto& r = static_cast<multi_target::{rfs.name}<T>&>(*base);")
-        lines.append("        return from_eigen_vec(r.cardinality());")
-        lines.append("    }")
-    lines.append("    return mxCreateDoubleMatrix(0, 0, mxREAL);")
-    lines.append("}")
-    lines.append("")
-
-    lines.append("static mxArray* cmd_rfs_get_cardinality(uint64_t handle) {")
-    lines.append("    auto& entry = get_entry(handle);")
-    lines.append("    auto rfs = get_obj<multi_target::RFSBase>(handle);")
-    for i, m in enumerate(models_list):
-        kw = "if" if i == 0 else "else if"
-        lines.append(f'    {kw} (entry.dist_type == "{m.name}")')
-        lines.append(f"        return get_cardinality_dispatch<{m.cpp_type}>(rfs.get(), entry.rfs_type);")
-    lines.append("    return mxCreateDoubleMatrix(0, 0, mxREAL);")
-    lines.append("}")
-    return "\n".join(lines)
-
-
-# ---------- Track histories ----------
 
 def gen_track_histories(models_list, rfs_types):
-    th_rfs = [r for r in rfs_types if r.has_track_histories]
-    if not th_rfs:
-        return ""
-
-    lines = [
-        "",
-        "// ============================================================",
-        "// Track History Getters",
-        "// ============================================================",
-        "",
-        "template<typename T>",
-        "static mxArray* get_track_histories_dispatch(multi_target::RFSBase* base,",
-        "                                              const std::string& rfs_type) {",
-    ]
-    for i, rfs in enumerate(th_rfs):
-        kw = "if" if i == 0 else "else if"
-        lines.append(f'    {kw} (rfs_type == "{rfs.name}") {{')
-        lines.append(f"        auto& r = static_cast<multi_target::{rfs.name}<T>&>(*base);")
-        lines.append("        return track_histories_to_matlab(r.track_histories());")
-        lines.append("    }")
-    lines.append("    return mxCreateStructMatrix(1, 0, 0, nullptr);")
-    lines.append("}")
-    lines.append("")
-
-    lines.append("static mxArray* cmd_rfs_get_track_histories(uint64_t handle) {")
-    lines.append("    auto& entry = get_entry(handle);")
-    lines.append("    auto rfs = get_obj<multi_target::RFSBase>(handle);")
-    for i, m in enumerate(models_list):
-        kw = "if" if i == 0 else "else if"
-        lines.append(f'    {kw} (entry.dist_type == "{m.name}")')
-        lines.append(f"        return get_track_histories_dispatch<{m.cpp_type}>(rfs.get(), entry.rfs_type);")
-    lines.append("    return mxCreateStructMatrix(1, 0, 0, nullptr);")
-    lines.append("}")
-    return "\n".join(lines)
+    return _gen_rfs_feature(models_list, rfs_types,
+        flag="has_track_histories", title="Track History Getters",
+        tmpl_name="get_track_histories_dispatch",
+        tmpl_sig="multi_target::RFSBase* base, const std::string& rfs_type",
+        tmpl_ret="mxArray*", inner_call="return track_histories_to_matlab(r.track_histories());",
+        cmd_name="cmd_rfs_get_track_histories", cmd_sig="uint64_t handle",
+        cmd_ret="mxArray*", default_ret="return mxCreateStructMatrix(1, 0, 0, nullptr);",
+        cmd_arg_fwd="return get_track_histories_dispatch<{cpp}>(rfs.get(), entry.rfs_type);")
 
 
 # ---------- mexFunction entry point ----------
 
-def gen_mex_function(clustering):
+def gen_mex_function(clustering, icp_types):
     lines = [
         "",
         "// ============================================================",
@@ -1163,6 +1135,21 @@ def gen_mex_function(clustering):
         cmd_name = f"create_{sn}"
         lines.append(f'    else if (cmd == "{cmd_name}") {{')
         lines.append(f"        plhs[0] = make_handle(cmd_create_{sn}(nrhs, prhs));")
+        lines.append("    }")
+
+    # ICP creation commands
+    for ic in icp_types:
+        sn = to_snake(ic.name)
+        cmd_name = f"create_{sn}"
+        lines.append(f'    else if (cmd == "{cmd_name}") {{')
+        lines.append(f"        plhs[0] = make_handle(cmd_create_{sn}(nrhs, prhs));")
+        lines.append("    }")
+
+    # ICP align
+    if icp_types:
+        lines.append('    else if (cmd == "icp_align") {')
+        lines.append('        if (nrhs < 4) mexErrMsgIdAndTxt("brew:badArgs", "icp_align: icp_h, source, target");')
+        lines.append("        plhs[0] = cmd_icp_align(nrhs, prhs);")
         lines.append("    }")
 
     lines.extend([
@@ -1238,25 +1225,24 @@ def gen_mex_function(clustering):
 # Main assembly — C++ MEX gateway
 # =============================================================================
 
-def generate_mex(dynamics, models_list, filters, rfs_types, clustering):
+def generate_mex(dynamics, models_list, filters, rfs_types, clustering, icp_types):
     model_map = {m.name: m for m in models_list}
 
     sections = [
-        gen_includes(dynamics, models_list, filters, rfs_types, clustering),
-        OBJECT_STORE,
-        HELPERS,
+        gen_includes(dynamics, models_list, filters, rfs_types, clustering, icp_types),
+        _load_static(),
         gen_dynamics_creation(dynamics),
         gen_clustering_creation(clustering),
+        gen_icp_creation(icp_types),
+        gen_icp_operations(icp_types),
         gen_filter_creation(filters),
         gen_mixture_creation(models_list, model_map),
         gen_rfs_creation(rfs_types, models_list),
-        RFS_OPERATIONS,
-        TRACK_HISTORY_HELPER,
         gen_extraction(models_list, model_map, rfs_types),
         gen_birth_weights(models_list, rfs_types),
         gen_cardinality(models_list, rfs_types),
         gen_track_histories(models_list, rfs_types),
-        gen_mex_function(clustering),
+        gen_mex_function(clustering, icp_types),
     ]
     return "\n".join(s for s in sections if s) + "\n"
 
@@ -1297,6 +1283,13 @@ def _matlab_model_data_class(model: ModelDef, model_map: dict) -> str:
     else:
         all_fields = model.fields + model.extract_extra
         all_props = [(f.name, "") for f in all_fields]
+        # Add handle, mat-wrapped, and int_vec fields as properties too
+        for hname, htype in model.create_handle_fields:
+            all_props.append((hname, f"{htype} handle"))
+        for mname, wtype in model.create_mat_fields:
+            all_props.append((mname, f"d×N point matrix"))
+        for ivname in model.create_int_vec_fields:
+            all_props.append((ivname, "index vector (1-based)"))
 
     props_lines = []
     for pname, pcomment in all_props:
@@ -1376,13 +1369,19 @@ def _matlab_mixture_class(model: ModelDef, model_map: dict) -> str:
     if model.is_trajectory:
         base = model_map[model.base_model]
         fields = base.fields
+        handle_fields = base.create_handle_fields
+        mat_fields = base.create_mat_fields
+        ivec_fields = base.create_int_vec_fields
     else:
         fields = model.fields
+        handle_fields = model.create_handle_fields
+        mat_fields = model.create_mat_fields
+        ivec_fields = model.create_int_vec_fields
 
     # Build inputParser parameters and mex call args
     params = []
     mex_args = []
-    conversions = []  # lines to convert cell->array for scalars
+    conversions = []
 
     for f in fields:
         if f.type in ("vec", "mat"):
@@ -1395,6 +1394,16 @@ def _matlab_mixture_class(model: ModelDef, model_map: dict) -> str:
                 f"            {var} = p.Results.{f.matlab_name}; "
                 f"if iscell({var}), {var} = cell2mat({var}); end")
             mex_args.append(var)
+
+    for hname, _ in handle_fields:
+        params.append(f"            addParameter(p, '{hname}', {{}});")
+        mex_args.append(f"p.Results.{hname}")
+    for mname, _ in mat_fields:
+        params.append(f"            addParameter(p, '{mname}', {{}});")
+        mex_args.append(f"p.Results.{mname}")
+    for ivname in ivec_fields:
+        params.append(f"            addParameter(p, '{ivname}', {{}});")
+        mex_args.append(f"p.Results.{ivname}")
 
     params.append("            addParameter(p, 'weights', []);")
     mex_args.append("p.Results.weights")
@@ -1720,10 +1729,191 @@ end
     return content
 
 
-def generate_matlab(dynamics, models_list, filters, rfs_types, clustering, outdir: Path):
+def _matlab_icp_class(ic: IcpDef) -> str:
+    """Generate a +BREW/+template_matching/<Name>.m wrapper class."""
+    name = ic.name
+    sn = to_snake(name)
+
+    # Build constructor: positional args, then optional params struct
+    pos_args = []
+    mex_args = []
+    for aname, atype in ic.args:
+        mode = atype.split(":")[0] if ":" in atype else atype
+        if mode in ("clone", "deref", "shared"):
+            # Handle type — pass .handle_ to MEX
+            pos_args.append(aname)
+            mex_args.append(f"{aname}.handle_")
+        else:
+            pos_args.append(aname)
+            mex_args.append(aname)
+
+    pos_str = ", ".join(pos_args)
+    mex_str = ", ".join(mex_args)
+
+    if pos_args:
+        ctor_sig = f"{pos_str}, params" if ic.params else pos_str
+        mex_call = f"brew_mex('create_{sn}', {mex_str}, params)" if ic.params else \
+                   f"brew_mex('create_{sn}', {mex_str})"
+    else:
+        ctor_sig = "params" if ic.params else ""
+        mex_call = f"brew_mex('create_{sn}', params)" if ic.params else \
+                   f"brew_mex('create_{sn}')"
+
+    # Default params
+    if ic.params:
+        default_check = f"""            if nargin < {len(pos_args) + 1}, params = struct(); end"""
+    else:
+        default_check = ""
+
+    content = f"""\
+classdef {name} < handle
+%{name} ICP algorithm wrapper (auto-generated).
+%   Accepts raw d×N point matrices for source/target (no PointCloud class needed).
+
+    properties (SetAccess = private)
+        handle_ uint64
+    end
+
+    methods
+        function obj = {name}({ctor_sig})
+{default_check}
+            obj.handle_ = {mex_call};
+        end
+
+        function result = align(obj, source_pts, target_pts, R_init, t_init)
+            %ALIGN Run ICP alignment.
+            %   source_pts: d×N matrix
+            %   target_pts: d×M matrix
+            %   R_init:     3×3 rotation (optional)
+            %   t_init:     3×1 translation (optional)
+            %   returns:    struct with rotation, translation, rmse, etc.
+            if nargin < 4, R_init = []; end
+            if nargin < 5, t_init = []; end
+            result = brew_mex('icp_align', obj.handle_, source_pts, target_pts, R_init, t_init);
+        end
+
+        function delete(obj)
+            if obj.handle_ ~= 0
+                try brew_mex('destroy', obj.handle_); catch, end
+            end
+        end
+    end
+end
+"""
+    return content
+
+
+def _matlab_mixture_data_class(models_list: list, model_map: dict) -> str:
+    """Generate +BREW/+models/Mixture.m — component-based extraction container."""
+
+    # Build the switch cases for constructing model objects from raw struct fields
+    cases = []
+    for m in models_list:
+        if m.is_trajectory:
+            base = model_map[m.base_model]
+            base_extra = [f for f in base.fields if f.name not in ("mean", "covariance")]
+            # Trajectory: mean, cov, state_dim, mean_history, + base extras via scalar/cell
+            ctor_parts = ["raw.means{i}", "raw.covariances{i}"]
+            ctor_parts.append("raw.state_dim")
+            ctor_parts.append("raw.mean_histories{i}")
+            for f in base_extra:
+                if f.type == "scalar":
+                    ctor_parts.append(f"raw.{f.matlab_name}(i)")
+                elif f.type in ("vec", "mat"):
+                    ctor_parts.append(f"raw.{f.matlab_name}{{i}}")
+            for f in base.extract_extra:
+                if f.type in ("vec", "mat"):
+                    ctor_parts.append(f"raw.{f.matlab_name}{{i}}")
+                elif f.type == "scalar":
+                    ctor_parts.append(f"raw.{f.matlab_name}(i)")
+        else:
+            ctor_parts = []
+            for f in m.fields:
+                if f.type in ("vec", "mat"):
+                    ctor_parts.append(f"raw.{f.matlab_name}{{i}}")
+                elif f.type == "scalar":
+                    ctor_parts.append(f"raw.{f.matlab_name}(i)")
+            for f in m.extract_extra:
+                if f.type in ("vec", "mat"):
+                    ctor_parts.append(f"raw.{f.matlab_name}{{i}}")
+                elif f.type == "scalar":
+                    ctor_parts.append(f"raw.{f.matlab_name}(i)")
+
+        ctor_str = ", ...\n                    ".join(ctor_parts)
+        cases.append(
+            f'            case "{m.name}"\n'
+            f"                comp = BREW.models.{m.name}( ...\n"
+            f"                    {ctor_str});"
+        )
+
+    switch_body = "\n".join(cases)
+    dist_names = ", ".join(f'"{m.name}"' for m in models_list)
+
+    return f"""\
+classdef Mixture < handle
+%MIXTURE Component-based mixture container returned from RFS extraction (auto-generated).
+%   Components are model objects stored as a struct array.
+%
+%   Usage:
+%       mix.components(i)         % i-th model object
+%       [mix.components.mean]     % all means (if same size) or {{mix.components.mean}}
+%       mix.weights               % weight vector
+%
+%   Supported dist_types: {dist_names}
+
+    properties (SetAccess = public)
+        components  cell   = {{}}   % {{model1, model2, ...}}
+        weights     double = []
+        dist_type   string = ""
+    end
+
+    methods
+        function obj = Mixture(raw, dist_type_override)
+            %MIXTURE Construct from raw MEX struct or manually.
+            if nargin == 0, return; end
+            if nargin >= 2 && ~isempty(dist_type_override)
+                obj.dist_type = string(dist_type_override);
+            end
+            if isstruct(raw)
+                if isfield(raw, 'dist_type') && (nargin < 2 || isempty(dist_type_override))
+                    obj.dist_type = string(raw.dist_type);
+                end
+                if isfield(raw, 'weights')
+                    obj.weights = raw.weights(:)';
+                end
+                n = numel(obj.weights);
+                obj.components = cell(1, n);
+                for i = 1:n
+                    obj.components{{i}} = build_component_(obj.dist_type, raw, i);
+                end
+            end
+        end
+
+        function n = length(obj), n = numel(obj.weights); end
+        function tf = isempty(obj), tf = isempty(obj.weights); end
+        function c = component(obj, i), c = obj.components{{i}}; end
+    end
+end
+
+function comp = build_component_(dist_type, raw, i)
+    switch dist_type
+{switch_body}
+        otherwise
+            comp = BREW.models.Gaussian(raw.means{{i}}, raw.covariances{{i}});
+    end
+end
+"""
+
+
+def generate_matlab(dynamics, models_list, filters, rfs_types, clustering, icp_types, outdir: Path):
     """Generate all MATLAB wrapper classes under the +BREW directory."""
     model_map = {m.name: m for m in models_list}
     messages = []
+
+    # --- Mixture data class (always overwrite) ---
+    path = outdir / "+models" / "Mixture.m"
+    content = _matlab_mixture_data_class(models_list, model_map)
+    messages.append(_write_if_changed(path, content, overwrite=True))
 
     # --- Model data classes (always overwrite) ---
     for m in models_list:
@@ -1756,6 +1946,12 @@ def generate_matlab(dynamics, models_list, filters, rfs_types, clustering, outdi
         content = _matlab_filter_class(filt)
         messages.append(_write_if_changed(path, content, overwrite=True))
 
+    # --- ICP objects (always overwrite) ---
+    for ic in icp_types:
+        path = outdir / "+template_matching" / f"{ic.name}.m"
+        content = _matlab_icp_class(ic)
+        messages.append(_write_if_changed(path, content, overwrite=True))
+
     return messages
 
 
@@ -1778,13 +1974,14 @@ def main():
         print(f"Error: include root '{root}' not found", file=sys.stderr)
         sys.exit(1)
 
-    dynamics, models_list, filters, rfs_types, clustering = scan_headers(root)
+    dynamics, models_list, filters, rfs_types, clustering, icp_types = scan_headers(root)
 
     print(f"Found: {len(dynamics)} dynamics, {len(models_list)} models, "
-          f"{len(filters)} filters, {len(rfs_types)} RFS types, {len(clustering)} clustering")
+          f"{len(filters)} filters, {len(rfs_types)} RFS types, "
+          f"{len(clustering)} clustering, {len(icp_types)} ICP types")
 
     # Generate C++ MEX gateway
-    code = generate_mex(dynamics, models_list, filters, rfs_types, clustering)
+    code = generate_mex(dynamics, models_list, filters, rfs_types, clustering, icp_types)
     Path(args.output).write_text(code, encoding="utf-8")
     print(f"Generated {args.output} ({len(code)} bytes)")
 
@@ -1792,7 +1989,7 @@ def main():
     if args.matlab_dir:
         outdir = Path(args.matlab_dir)
         messages = generate_matlab(
-            dynamics, models_list, filters, rfs_types, clustering, outdir)
+            dynamics, models_list, filters, rfs_types, clustering, icp_types, outdir)
         print(f"\nMATLAB wrappers ({outdir}):")
         for msg in messages:
             print(msg)

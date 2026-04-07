@@ -1,5 +1,5 @@
-function build_brew_mex()
-%BUILD_BREW_MEX Generate and compile the brew_mex MEX gateway.
+function build_brew()
+%BUILD_BREW Generate and compile the brew MEX gateway + MATLAB wrappers.
 %   1. Runs generate_mex.py to regenerate brew_mex.cpp and +BREW wrappers
 %      from @mex annotations in the C++ headers.
 %   2. Auto-discovers C++ source files needed for compilation.
@@ -9,24 +9,27 @@ function build_brew_mex()
 %   Eigen is automatically downloaded on first build to deps/eigen.
 %
 %   Usage:
-%       build_brew_mex          % full rebuild (generate + compile)
+%       build_brew
 
     here = fileparts(mfilename('fullpath'));
     brew_root = fullfile(here, 'brew');
+    gen_dir = fullfile(here, 'generator_files');
+
+    % f = waitbar(0,'Please wait...');
 
     % =================================================================
     % Step 1: Run Python generator
     % =================================================================
     fprintf('--- Step 1: Generating brew_mex.cpp and MATLAB wrappers ---\n');
 
-    gen_script = fullfile(here, 'generate_mex.py');
+    gen_script = fullfile(gen_dir, 'generate_mex.py');
     if ~isfile(gen_script)
-        error('brew:build', 'generate_mex.py not found in %s', here);
+        error('brew:build', 'generate_mex.py not found in %s', gen_dir);
     end
 
     cmd = sprintf('python "%s" --output "%s" --include-root "%s" --matlab-dir "%s"', ...
         gen_script, ...
-        fullfile(here, 'brew_mex.cpp'), ...
+        fullfile(gen_dir, 'brew_mex.cpp'), ...
         fullfile(brew_root, 'include'), ...
         fullfile(here, '+BREW'));
 
@@ -49,23 +52,33 @@ function build_brew_mex()
     end
 
     % Start with the generated gateway
-    sources = {fullfile(here, 'brew_mex.cpp')};
+    sources = {fullfile(gen_dir, 'brew_mex.cpp')};
 
     % Auto-discover .cpp files from relevant subdirectories
     src_base = fullfile(brew_root, 'src', 'brew');
     scan_dirs = {'dynamics', 'filters', 'fusion', 'clustering', 'models', ...
-                 'multi_target', 'assignment', 'metrics'};
+                 'multi_target', 'assignment', 'metrics', 'template_matching'};
 
-    for i = 1:numel(scan_dirs)
+    % Files to skip (plot, I/O with external deps)
+    skip_patterns = {'point_cloud_io'};
+
+    num_files = numel(scan_dirs);
+
+    for i = 1:num_files
+        % waitbar(i / num_files,f,'Collecting Source Files');
         d = fullfile(src_base, scan_dirs{i});
         if isfolder(d)
             cpps = dir(fullfile(d, '*.cpp'));
             for j = 1:numel(cpps)
-                src = fullfile(d, cpps(j).name);
-                % Skip template matching and plot files that may end up here
-                if ~contains(cpps(j).name, 'tm_ekf') && ...
-                   ~contains(cpps(j).name, 'trajectory_tm')
-                    sources{end+1} = src; %#ok<AGROW>
+                skip = false;
+                for k = 1:numel(skip_patterns)
+                    if contains(cpps(j).name, skip_patterns{k})
+                        skip = true;
+                        break;
+                    end
+                end
+                if ~skip
+                    sources{end+1} = fullfile(d, cpps(j).name); 
                 end
             end
         end
@@ -80,12 +93,15 @@ function build_brew_mex()
 
     fprintf('  Sources: %d files\n', numel(sources));
 
+    % waitbar(1,f,'Compiling MEX');
+
     % =================================================================
     % Step 3: Compile MEX
     % =================================================================
     fprintf('\n--- Step 3: Compiling brew_mex ---\n');
     fprintf('  Brew include: %s\n', brew_include);
     fprintf('  Eigen include: %s\n', eigen_include);
+    fprintf('  This could take a few minutes.\n');
 
     include_flags = {
         ['-I' brew_include]
@@ -104,6 +120,9 @@ function build_brew_mex()
     mex(args{:});
 
     fprintf('\nbrew_mex built successfully.\n');
+
+    % close(f)
+
 end
 
 
