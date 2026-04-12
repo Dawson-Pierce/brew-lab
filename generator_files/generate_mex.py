@@ -63,6 +63,7 @@ class RFSDef:
     has_cardinality: bool = False
     has_track_histories: bool = False
     has_birth_weights: bool = False
+    has_cluster_object: bool = False
     optional_params: List[Tuple[str, str]] = dfield(default_factory=list)
 
 
@@ -229,6 +230,7 @@ def scan_headers(root: Path):
                         has_cardinality="cardinality" in has,
                         has_track_histories="track_histories" in has,
                         has_birth_weights="birth_weights" in has,
+                        has_cluster_object="cluster_object" in has,
                         optional_params=opt_params,
                     ))
 
@@ -1101,6 +1103,38 @@ def gen_track_histories(models_list, rfs_types):
         cmd_arg_fwd="return get_track_histories_dispatch<{cpp}>(rfs.get(), entry.rfs_type);")
 
 
+def gen_cluster_object_setter(models_list, rfs_types):
+    subset = [r for r in rfs_types if r.has_cluster_object]
+    if not subset:
+        return ""
+    L = ["", "// Cluster Object Setters", ""]
+    # Template dispatch on rfs_type
+    L.append("template<typename T>")
+    L.append("static void set_cluster_for_rfs(multi_target::RFSBase* base, const std::string& rfs_type,")
+    L.append("                                 std::shared_ptr<clustering::DBSCAN> obj) {")
+    for i, r in enumerate(subset):
+        kw = "if" if i == 0 else "else if"
+        L.append(f'    {kw} (rfs_type == "{r.name}") {{')
+        L.append(f"        static_cast<multi_target::{r.name}<T>&>(*base).set_cluster_object(obj);")
+        L.append("    }")
+    L.append('    else { mexErrMsgIdAndTxt("brew:unsupported",')
+    L.append('        "set_cluster_object not supported for RFS type: %s", rfs_type.c_str()); }')
+    L.append("}")
+    L.append("")
+    # Command dispatch on dist_type
+    L.append("static void cmd_rfs_set_cluster_object(uint64_t rfs_handle, uint64_t cluster_handle) {")
+    L.append("    auto& entry = get_entry(rfs_handle);")
+    L.append("    auto rfs = get_obj<multi_target::RFSBase>(rfs_handle);")
+    L.append("    auto cluster = get_obj<clustering::DBSCAN>(cluster_handle);")
+    for i, m in enumerate(models_list):
+        kw = "if" if i == 0 else "else if"
+        L.append(f'    {kw} (entry.dist_type == "{m.name}")')
+        L.append(f"        set_cluster_for_rfs<{m.cpp_type}>(rfs.get(), entry.rfs_type, cluster);")
+    L.append('    else mexErrMsgIdAndTxt("brew:badDist", "Unknown dist type: %s", entry.dist_type.c_str());')
+    L.append("}")
+    return "\n".join(L)
+
+
 # ---------- mexFunction entry point ----------
 
 def gen_mex_function(clustering, icp_types):
@@ -1193,6 +1227,10 @@ def gen_mex_function(clustering, icp_types):
         "        Eigen::VectorXd w = to_eigen_vec(prhs[2]);",
         "        cmd_rfs_set_birth_weights(get_handle(prhs[1]), w);",
         "    }",
+        '    else if (cmd == "rfs_set_cluster_object") {',
+        '        if (nrhs < 3) mexErrMsgIdAndTxt("brew:badArgs", "rfs_set_cluster_object: rfs_handle, cluster_handle");',
+        "        cmd_rfs_set_cluster_object(get_handle(prhs[1]), get_handle(prhs[2]));",
+        "    }",
         "",
         "    // --- Getters ---",
         '    else if (cmd == "rfs_get_cardinality") {',
@@ -1240,6 +1278,7 @@ def generate_mex(dynamics, models_list, filters, rfs_types, clustering, icp_type
         gen_rfs_creation(rfs_types, models_list),
         gen_extraction(models_list, model_map, rfs_types),
         gen_birth_weights(models_list, rfs_types),
+        gen_cluster_object_setter(models_list, rfs_types),
         gen_cardinality(models_list, rfs_types),
         gen_track_histories(models_list, rfs_types),
         gen_mex_function(clustering, icp_types),
@@ -1499,6 +1538,12 @@ def _matlab_rfs_class(rfs: RFSDef) -> str:
             h = brew_mex('rfs_get_track_histories', obj.handle_);
         end
 """
+    if rfs.has_cluster_object:
+        extra_methods += """
+        function set_cluster_object(obj, cluster_obj)
+            brew_mex('rfs_set_cluster_object', obj.handle_, cluster_obj.handle_);
+        end
+"""
 
     content = f"""\
 classdef {name} < handle
@@ -1716,6 +1761,37 @@ classdef {name} < handle
             %   Override in a subclass to implement MATLAB-side correction.
             error('BREW:notImplemented', ...
                 '{name}.correct is not implemented. Subclass {name} and override this method.');
+        end
+
+        function delete(obj)
+            if obj.handle_ ~= 0
+                try brew_mex('destroy', obj.handle_); catch, end
+            end
+        end
+    end
+end
+"""
+    return content
+
+
+def _matlab_clustering_class(c: ClusteringDef) -> str:
+    """Generate a +BREW/+clustering/<Name>.m wrapper class."""
+    sn = to_snake(c.name)
+    arg_names = [a for a, _ in c.args]
+    sig = ", ".join(arg_names)
+    mex_str = ", ".join(arg_names)
+
+    content = f"""\
+classdef {c.name} < handle
+%{c.name} Clustering object wrapper (auto-generated).
+
+    properties (SetAccess = private)
+        handle_ uint64
+    end
+
+    methods
+        function obj = {c.name}({sig})
+            obj.handle_ = brew_mex('create_{sn}', {mex_str});
         end
 
         function delete(obj)
@@ -1950,6 +2026,12 @@ def generate_matlab(dynamics, models_list, filters, rfs_types, clustering, icp_t
     for ic in icp_types:
         path = outdir / "+template_matching" / f"{ic.name}.m"
         content = _matlab_icp_class(ic)
+        messages.append(_write_if_changed(path, content, overwrite=True))
+
+    # --- Clustering objects (always overwrite) ---
+    for c in clustering:
+        path = outdir / "+clustering" / f"{c.name}.m"
+        content = _matlab_clustering_class(c)
         messages.append(_write_if_changed(path, content, overwrite=True))
 
     return messages
