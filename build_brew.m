@@ -54,32 +54,32 @@ function build_brew()
     % Start with the generated gateway
     sources = {fullfile(gen_dir, 'brew_mex.cpp')};
 
-    % Auto-discover .cpp files from relevant subdirectories
+    % Auto-discover .cpp files from relevant subtrees.
+    % Brew is now organised as src/brew/{core,advanced,desktop}/<subsystem>.
+    % We pull in core/ and advanced/ recursively; desktop/ is skipped because
+    % its plotting/IO sources depend on external libraries not needed by MEX.
     src_base = fullfile(brew_root, 'src', 'brew');
-    scan_dirs = {'dynamics', 'filters', 'fusion', 'clustering', 'models', ...
-                 'multi_target', 'assignment', 'metrics', 'template_matching'};
+    scan_roots = {'core', 'advanced'};
 
-    % Files to skip (plot, I/O with external deps)
+    % Files to skip (I/O with external deps)
     skip_patterns = {'point_cloud_io'};
 
-    num_files = numel(scan_dirs);
-
-    for i = 1:num_files
-        % waitbar(i / num_files,f,'Collecting Source Files');
-        d = fullfile(src_base, scan_dirs{i});
-        if isfolder(d)
-            cpps = dir(fullfile(d, '*.cpp'));
-            for j = 1:numel(cpps)
-                skip = false;
-                for k = 1:numel(skip_patterns)
-                    if contains(cpps(j).name, skip_patterns{k})
-                        skip = true;
-                        break;
-                    end
+    for i = 1:numel(scan_roots)
+        root_dir = fullfile(src_base, scan_roots{i});
+        if ~isfolder(root_dir)
+            continue
+        end
+        cpps = dir(fullfile(root_dir, '**', '*.cpp'));
+        for j = 1:numel(cpps)
+            skip = false;
+            for k = 1:numel(skip_patterns)
+                if contains(cpps(j).name, skip_patterns{k})
+                    skip = true;
+                    break;
                 end
-                if ~skip
-                    sources{end+1} = fullfile(d, cpps(j).name); 
-                end
+            end
+            if ~skip
+                sources{end+1} = fullfile(cpps(j).folder, cpps(j).name); %#ok<AGROW>
             end
         end
     end

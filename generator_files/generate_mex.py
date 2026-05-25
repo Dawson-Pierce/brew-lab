@@ -13,6 +13,36 @@ from dataclasses import dataclass, field as dfield
 from typing import List, Tuple
 
 
+# Compile-time window size used for every Trajectory<T, MaxWindow> and
+# trajectory filter instantiation in the MEX gateway.  The C++ refactor
+# (brew @ ig_giw_dev) made MaxWindow a required template parameter; the
+# gateway only ships a single instantiation per dist type, so we pick one
+# fixed window size large enough for the existing test scripts.
+TRAJECTORY_MAX_WINDOW = 50
+
+
+# Types currently incompatible with the MEX gateway.  These are intentionally
+# excluded until the gateway grows multiple specializations or the
+# upstream @mex annotations are updated.
+#
+# - Fixed-dim dynamics (ConstantTurn2D, DoubleIntegrator3DEuler) extend
+#   DynamicsBase<double, N> with a compile-time N, so they can't be stored
+#   alongside dynamic-dim dynamics in a single polymorphic store.
+# - TemplatePose / TrajectoryTemplatePose models declare a constructor
+#   with an `int template_id` argument that the current generator can't
+#   express via @mex_fields ordering.  The TmEkf filters depend on those
+#   models, so they're skipped too.
+SKIP_DYNAMICS = {"ConstantTurn2D", "DoubleIntegrator3DEuler"}
+SKIP_MODELS = {"TemplatePose", "TrajectoryTemplatePose"}
+SKIP_FILTERS = {"TmEkf", "TrajectoryTmEkf"}
+
+# Models that are valid for the single-target filter path (predict/correct
+# via MATLAB or the C++ Filter handle) but cannot yet be embedded inside an
+# RFS filter.  Currently empty: IGGIW is supported now that brew ships an
+# IGGIW overload of fusion::merge.
+SKIP_RFS_MODELS = set()
+
+
 # =============================================================================
 # Data structures
 # =============================================================================
@@ -186,16 +216,20 @@ def scan_headers(root: Path):
                 cat = tags.get("_category", "")
 
                 if cat == "dynamics":
+                    if tags.get("name") in SKIP_DYNAMICS:
+                        continue
                     args = parse_args_str(tags.get("args", ""))
                     dynamics.append(DynamicsDef(tags["name"], header, args))
 
                 elif cat == "model":
                     name = tags["name"]
+                    if name in SKIP_MODELS:
+                        continue
                     if "trajectory" in tags:
                         base = tags["trajectory"]
                         models_list.append(ModelDef(
                             name=name, header=header,
-                            cpp_type=f"models::Trajectory<models::{base}>",
+                            cpp_type=f"models::Trajectory<models::{base}<>, {TRAJECTORY_MAX_WINDOW}>",
                             fields=[], is_trajectory=True, base_model=base,
                         ))
                     else:
@@ -206,7 +240,7 @@ def scan_headers(root: Path):
                         ivec_fields = [s.strip() for s in tags.get("create_int_vec_fields", "").split(",") if s.strip()]
                         models_list.append(ModelDef(
                             name=name, header=header,
-                            cpp_type=f"models::{name}",
+                            cpp_type=f"models::{name}<>",
                             fields=fields, extract_extra=extras,
                             create_handle_fields=handle_fields,
                             create_mat_fields=mat_fields,
@@ -214,6 +248,8 @@ def scan_headers(root: Path):
                         ))
 
                 elif cat == "filter":
+                    if tags.get("name") in SKIP_FILTERS:
+                        continue
                     setters = parse_args_str(tags.get("setters", ""))
                     handle_setters = parse_args_str(tags.get("handle_setters", ""))
                     filters.append(FilterDef(tags["name"], header, tags["dist"], setters,
@@ -300,8 +336,8 @@ def gen_includes(dynamics, models_list, filters, rfs_types, clustering, icp_type
     for ic in icp_types:
         headers.add(ic.header)
     # Always include mixture and bernoulli
-    headers.add("brew/models/mixture.hpp")
-    headers.add("brew/models/bernoulli.hpp")
+    headers.add("brew/core/models/mixture.hpp")
+    headers.add("brew/core/models/bernoulli.hpp")
 
     for h in sorted(headers):
         lines.append(f'#include "{h}"')
@@ -320,14 +356,14 @@ def gen_dynamics_creation(dynamics):
         "",
         "static uint64_t cmd_create_dynamics(int nrhs, const mxArray* prhs[]) {",
         '    std::string type = get_string(prhs[1]);',
-        "    std::shared_ptr<dynamics::DynamicsBase> dyn;",
+        "    std::shared_ptr<dynamics::DynamicsBase<>> dyn;",
         "",
     ]
     for i, d in enumerate(dynamics):
         kw = "if" if i == 0 else "else if"
         if not d.args:
             lines.append(f'    {kw} (type == "{d.name}")')
-            lines.append(f"        dyn = std::make_shared<dynamics::{d.name}>();")
+            lines.append(f"        dyn = std::make_shared<dynamics::{d.name}<>>();")
         else:
             lines.append(f'    {kw} (type == "{d.name}") {{')
             for j, (aname, atype) in enumerate(d.args):
@@ -337,7 +373,7 @@ def gen_dynamics_creation(dynamics):
                 else:
                     lines.append(f"        double {aname} = (nrhs > {idx}) ? mxGetScalar(prhs[{idx}]) : 0.0;")
             astr = ", ".join(a for a, _ in d.args)
-            lines.append(f"        dyn = std::make_shared<dynamics::{d.name}>({astr});")
+            lines.append(f"        dyn = std::make_shared<dynamics::{d.name}<>>({astr});")
             lines.append("    }")
     lines.append("    else")
     lines.append('        mexErrMsgIdAndTxt("brew:badDyn", "Unknown dynamics type: %s", type.c_str());')
@@ -516,13 +552,19 @@ def gen_filter_creation(filters_list):
         "    Eigen::MatrixXd H = to_eigen_mat(prhs[4]);",
         "    Eigen::MatrixXd R = to_eigen_mat(prhs[5]);",
         "",
-        "    auto dyn = get_obj<dynamics::DynamicsBase>(dyn_h);",
+        "    auto dyn = get_obj<dynamics::DynamicsBase<>>(dyn_h);",
         "",
     ]
     for i, f in enumerate(filters_list):
         kw = "if" if i == 0 else "else if"
+        # Trajectory filters take MaxWindow as their first template parameter
+        # (no default).  Non-trajectory filters have all-default template args.
+        if f.dist.startswith("Trajectory"):
+            filter_inst = f"filters::{f.name}<{TRAJECTORY_MAX_WINDOW}>"
+        else:
+            filter_inst = f"filters::{f.name}<>"
         lines.append(f'    {kw} (ftype == "{f.name}") {{')
-        lines.append(f"        auto f = std::make_shared<filters::{f.name}>();")
+        lines.append(f"        auto f = std::make_shared<{filter_inst}>();")
         lines.append("        f->set_dynamics(dyn);")
         lines.append("        f->set_process_noise(Q);")
         lines.append("        f->set_measurement_jacobian(H);")
@@ -799,12 +841,23 @@ def gen_rfs_creation(rfs_types, models_list):
         lines.append("    auto filt = get_obj<filters::Filter<T>>(filter_h);")
         lines.append("    rfs->set_filter(filt->clone());")
         lines.append("    auto birth = get_obj<models::Mixture<T>>(birth_h);")
-        lines.append("    rfs->set_birth_model(birth->clone());")
+        # set_birth_model takes 1 arg for PHD/CPHD/PMBM, but 2 args
+        # (mixture + p_birth) for the GLMB/JGLMB/MBM family.  Dispatch
+        # via C++20 `requires` and pull p_birth from the params struct.
+        lines.append('    double p_birth = get_field_double(p, "p_birth", 0.5);')
+        lines.append("    if constexpr (requires { rfs->set_birth_model(birth->clone()); }) {")
+        lines.append("        (void)p_birth;")
+        lines.append("        rfs->set_birth_model(birth->clone());")
+        lines.append("    } else {")
+        lines.append("        rfs->set_birth_model(birth->clone(), p_birth);")
+        lines.append("    }")
         lines.append("")
 
         for pname, ptype, pdefault in rfs.params:
             if ptype == "int":
                 lines.append(f'    rfs->set_{pname}(get_field_int(p, "{pname}", {pdefault}));')
+            elif ptype == "bool":
+                lines.append(f'    rfs->set_{pname}(get_field_double(p, "{pname}", {pdefault}) != 0);')
             else:
                 lines.append(f'    rfs->set_{pname}(get_field_double(p, "{pname}", {pdefault}));')
 
@@ -830,7 +883,9 @@ def gen_rfs_creation(rfs_types, models_list):
     lines.append("    return 0;")
     lines.append("}")
 
-    # Main dispatcher: dist_type → T
+    # Main dispatcher: dist_type → T.  Skip models whose RFS combination
+    # is unsupported by the underlying brew library (see SKIP_RFS_MODELS).
+    rfs_models = [m for m in models_list if m.name not in SKIP_RFS_MODELS]
     lines.append("")
     lines.append("static uint64_t cmd_create_rfs(int nrhs, const mxArray* prhs[]) {")
     lines.append("    if (nrhs < 6)")
@@ -842,12 +897,12 @@ def gen_rfs_creation(rfs_types, models_list):
     lines.append("    uint64_t bh = get_handle(prhs[4]);")
     lines.append("    const mxArray* params = prhs[5];")
     lines.append("")
-    for i, m in enumerate(models_list):
+    for i, m in enumerate(rfs_models):
         kw = "if" if i == 0 else "else if"
         lines.append(f'    {kw} (dist_type == "{m.name}")')
         lines.append(f"        return create_rfs_dispatch_dist<{m.cpp_type}>(rfs_type, fh, bh, params);")
     lines.append("    else")
-    lines.append('        mexErrMsgIdAndTxt("brew:badDist", "Unknown dist type: %s", dist_type.c_str());')
+    lines.append('        mexErrMsgIdAndTxt("brew:badDist", "Unknown or RFS-unsupported dist type: %s", dist_type.c_str());')
     lines.append("    return 0;")
     lines.append("}")
     return "\n".join(lines)
@@ -984,21 +1039,33 @@ def gen_extraction(models_list, model_map, rfs_types):
         else:
             lines.append(_gen_basic_extraction(m))
 
-    # Generic extract_from_rfs template
+    # Generic extract_from_rfs template.  PHD/CPHD expose a per-call extract();
+    # GLMB/JGLMB/MBM/PMBM only expose extracted_mixtures() (a deque populated
+    # during cleanup()).  Dispatch with C++20 `requires` so the same template
+    # works for both shapes.
+    lines.append("static mxArray* empty_mixture_struct() {")
+    lines.append('    const char* f[] = {"means","covariances","weights","dist_type"};')
+    lines.append("    mxArray* s = mxCreateStructMatrix(1,1,4,f);")
+    lines.append('    mxSetField(s,0,"means",mxCreateCellMatrix(1,0));')
+    lines.append('    mxSetField(s,0,"covariances",mxCreateCellMatrix(1,0));')
+    lines.append('    mxSetField(s,0,"weights",mxCreateDoubleMatrix(1,0,mxREAL));')
+    lines.append('    mxSetField(s,0,"dist_type",mxCreateString(""));')
+    lines.append("    return s;")
+    lines.append("}")
+    lines.append("")
     lines.append("template<typename T, template<typename> class RFS>")
     lines.append("static mxArray* extract_from_rfs(multi_target::RFSBase* base) {")
     lines.append("    auto& rfs = static_cast<RFS<T>&>(*base);")
-    lines.append("    auto mix = rfs.extract();")
-    lines.append("    if (!mix || mix->empty()) {")
-    lines.append('        const char* f[] = {"means","covariances","weights","dist_type"};')
-    lines.append("        mxArray* s = mxCreateStructMatrix(1,1,4,f);")
-    lines.append('        mxSetField(s,0,"means",mxCreateCellMatrix(1,0));')
-    lines.append('        mxSetField(s,0,"covariances",mxCreateCellMatrix(1,0));')
-    lines.append('        mxSetField(s,0,"weights",mxCreateDoubleMatrix(1,0,mxREAL));')
-    lines.append('        mxSetField(s,0,"dist_type",mxCreateString(""));')
-    lines.append("        return s;")
+    lines.append("    if constexpr (requires { rfs.extract(); }) {")
+    lines.append("        auto mix = rfs.extract();")
+    lines.append("        if (!mix || mix->empty()) return empty_mixture_struct();")
+    lines.append("        return mixture_to_matlab(*mix);")
+    lines.append("    } else {")
+    lines.append("        const auto& hist = rfs.extracted_mixtures();")
+    lines.append("        if (hist.empty() || !hist.back() || hist.back()->empty())")
+    lines.append("            return empty_mixture_struct();")
+    lines.append("        return mixture_to_matlab(*hist.back());")
     lines.append("    }")
-    lines.append("    return mixture_to_matlab(*mix);")
     lines.append("}")
     lines.append("")
 
@@ -1013,17 +1080,19 @@ def gen_extraction(models_list, model_map, rfs_types):
     lines.append("}")
     lines.append("")
 
-    # Main extract dispatcher on dist_type
+    # Main extract dispatcher on dist_type.  Same filter as in cmd_create_rfs:
+    # dist types in SKIP_RFS_MODELS never reach the RFS path.
+    rfs_models = [m for m in models_list if m.name not in SKIP_RFS_MODELS]
     lines.append("static mxArray* cmd_rfs_extract(uint64_t handle) {")
     lines.append("    auto& entry = get_entry(handle);")
     lines.append("    auto rfs = get_obj<multi_target::RFSBase>(handle);")
     lines.append("")
-    for i, m in enumerate(models_list):
+    for i, m in enumerate(rfs_models):
         kw = "if" if i == 0 else "else if"
         lines.append(f'    {kw} (entry.dist_type == "{m.name}")')
         lines.append(f"        return extract_dispatch_rfs<{m.cpp_type}>(rfs.get(), entry.rfs_type);")
     lines.append("    else")
-    lines.append('        mexErrMsgIdAndTxt("brew:badDist", "Unknown dist type: %s", entry.dist_type.c_str());')
+    lines.append('        mexErrMsgIdAndTxt("brew:badDist", "Unknown or RFS-unsupported dist type: %s", entry.dist_type.c_str());')
     lines.append("    return nullptr;")
     lines.append("}")
     return "\n".join(lines)
@@ -1053,18 +1122,19 @@ def _gen_rfs_feature(models_list, rfs_types, flag, title, tmpl_name, tmpl_sig,
     if default_ret:
         L.append(f"    {default_ret}")
     L += ["}", ""]
-    # Command dispatch on dist_type
+    # Command dispatch on dist_type — skip RFS-unsupported models.
+    rfs_models = [m for m in models_list if m.name not in SKIP_RFS_MODELS]
     L.append(f"static {cmd_ret} {cmd_name}({cmd_sig}) {{")
     L.append("    auto& entry = get_entry(handle);")
     L.append("    auto rfs = get_obj<multi_target::RFSBase>(handle);")
-    for i, m in enumerate(models_list):
+    for i, m in enumerate(rfs_models):
         kw = "if" if i == 0 else "else if"
         L.append(f'    {kw} (entry.dist_type == "{m.name}")')
         L.append(f"        {cmd_arg_fwd.format(cpp=m.cpp_type)}")
     if default_ret:
         L.append(f"    {default_ret}")
     else:
-        L.append('    else mexErrMsgIdAndTxt("brew:badDist", "Unknown dist type: %s", entry.dist_type.c_str());')
+        L.append('    else mexErrMsgIdAndTxt("brew:badDist", "Unknown or RFS-unsupported dist type: %s", entry.dist_type.c_str());')
     L.append("}")
     return "\n".join(L)
 
@@ -1121,16 +1191,17 @@ def gen_cluster_object_setter(models_list, rfs_types):
     L.append('        "set_cluster_object not supported for RFS type: %s", rfs_type.c_str()); }')
     L.append("}")
     L.append("")
-    # Command dispatch on dist_type
+    # Command dispatch on dist_type — skip RFS-unsupported models.
+    rfs_models = [m for m in models_list if m.name not in SKIP_RFS_MODELS]
     L.append("static void cmd_rfs_set_cluster_object(uint64_t rfs_handle, uint64_t cluster_handle) {")
     L.append("    auto& entry = get_entry(rfs_handle);")
     L.append("    auto rfs = get_obj<multi_target::RFSBase>(rfs_handle);")
     L.append("    auto cluster = get_obj<clustering::DBSCAN>(cluster_handle);")
-    for i, m in enumerate(models_list):
+    for i, m in enumerate(rfs_models):
         kw = "if" if i == 0 else "else if"
         L.append(f'    {kw} (entry.dist_type == "{m.name}")')
         L.append(f"        set_cluster_for_rfs<{m.cpp_type}>(rfs.get(), entry.rfs_type, cluster);")
-    L.append('    else mexErrMsgIdAndTxt("brew:badDist", "Unknown dist type: %s", entry.dist_type.c_str());')
+    L.append('    else mexErrMsgIdAndTxt("brew:badDist", "Unknown or RFS-unsupported dist type: %s", entry.dist_type.c_str());')
     L.append("}")
     return "\n".join(L)
 
