@@ -18,7 +18,7 @@ from typing import List, Tuple
 # (brew @ ig_giw_dev) made MaxWindow a required template parameter; the
 # gateway only ships a single instantiation per dist type, so we pick one
 # fixed window size large enough for the existing test scripts.
-TRAJECTORY_MAX_WINDOW = 50
+TRAJECTORY_MAX_WINDOW = 5
 
 
 # Types currently incompatible with the MEX gateway.  These are intentionally
@@ -399,6 +399,21 @@ def gen_clustering_creation(clustering):
             cast = "static_cast<int>" if atype == "int" else ""
             if atype == "int":
                 lines.append(f"    int {aname} = (nrhs > {idx}) ? static_cast<int>(mxGetScalar(prhs[{idx}])) : {dflt};")
+            elif atype == "ivec":
+                lines.append(f"    std::vector<int> {aname};")
+                lines.append(f"    if (nrhs > {idx} && !mxIsEmpty(prhs[{idx}])) {{")
+                lines.append(f"        size_t n_{aname} = mxGetNumberOfElements(prhs[{idx}]);")
+                lines.append(f"        double* p_{aname} = mxGetDoubles(prhs[{idx}]);")
+                lines.append(f"        for (size_t t = 0; t < n_{aname}; ++t)")
+                lines.append(f"            {aname}.push_back(static_cast<int>(p_{aname}[t]) - 1);")
+                lines.append(f"    }}")
+            elif atype == "vec":
+                lines.append(f"    std::vector<double> {aname};")
+                lines.append(f"    if (nrhs > {idx} && !mxIsEmpty(prhs[{idx}])) {{")
+                lines.append(f"        size_t n_{aname} = mxGetNumberOfElements(prhs[{idx}]);")
+                lines.append(f"        double* p_{aname} = mxGetDoubles(prhs[{idx}]);")
+                lines.append(f"        {aname}.assign(p_{aname}, p_{aname} + n_{aname});")
+                lines.append(f"    }}")
             else:
                 lines.append(f"    double {aname} = (nrhs > {idx}) ? mxGetScalar(prhs[{idx}]) : {dflt};")
         astr = ", ".join(a for a, _ in c.args)
@@ -961,7 +976,7 @@ def _gen_trajectory_extraction(model, model_map):
     extra_base = [f for f in base.fields if f.name not in ("mean", "covariance")]
     extra_extract = base.extract_extra
 
-    struct_names = ["means", "covariances", "weights", "dist_type", "state_dim", "mean_histories"]
+    struct_names = ["means", "covariances", "weights", "dist_type", "state_dim", "mean_histories", "state_histories"]
     for f in extra_base:
         struct_names.append(f.matlab_name)
     for f in extra_extract:
@@ -979,6 +994,7 @@ def _gen_trajectory_extraction(model, model_map):
     lines.append("    mxArray* mean_c = mxCreateCellMatrix(1, n);")
     lines.append("    mxArray* cov_c = mxCreateCellMatrix(1, n);")
     lines.append("    mxArray* hist_c = mxCreateCellMatrix(1, n);")
+    lines.append("    mxArray* shist_c = mxCreateCellMatrix(1, n);")
 
     for f in extra_base + extra_extract:
         if f.type in ("vec", "mat"):
@@ -994,6 +1010,7 @@ def _gen_trajectory_extraction(model, model_map):
     lines.append("        mxSetCell(mean_c, i, from_eigen_vec(comp.mean()));")
     lines.append("        mxSetCell(cov_c, i, from_eigen_mat(comp.covariance()));")
     lines.append("        mxSetCell(hist_c, i, from_eigen_mat(comp.mean_history()));")
+    lines.append("        mxSetCell(shist_c, i, from_eigen_mat(comp.state_history_means()));")
 
     for f in extra_base + extra_extract:
         if f.type == "vec":
@@ -1012,6 +1029,7 @@ def _gen_trajectory_extraction(model, model_map):
     lines.append(f'    mxSetField(s, 0, "dist_type", mxCreateString("{model.name}"));')
     lines.append('    mxSetField(s, 0, "state_dim", mxCreateDoubleScalar(sd));')
     lines.append('    mxSetField(s, 0, "mean_histories", hist_c);')
+    lines.append('    mxSetField(s, 0, "state_histories", shist_c);')
 
     for f in extra_base + extra_extract:
         if f.type in ("vec", "mat"):
@@ -1181,7 +1199,7 @@ def gen_cluster_object_setter(models_list, rfs_types):
     # Template dispatch on rfs_type
     L.append("template<typename T>")
     L.append("static void set_cluster_for_rfs(multi_target::RFSBase* base, const std::string& rfs_type,")
-    L.append("                                 std::shared_ptr<clustering::DBSCAN> obj) {")
+    L.append("                                 std::shared_ptr<clustering::ClusterBase> obj) {")
     for i, r in enumerate(subset):
         kw = "if" if i == 0 else "else if"
         L.append(f'    {kw} (rfs_type == "{r.name}") {{')
@@ -1196,7 +1214,7 @@ def gen_cluster_object_setter(models_list, rfs_types):
     L.append("static void cmd_rfs_set_cluster_object(uint64_t rfs_handle, uint64_t cluster_handle) {")
     L.append("    auto& entry = get_entry(rfs_handle);")
     L.append("    auto rfs = get_obj<multi_target::RFSBase>(rfs_handle);")
-    L.append("    auto cluster = get_obj<clustering::DBSCAN>(cluster_handle);")
+    L.append("    auto cluster = get_obj<clustering::ClusterBase>(cluster_handle);")
     for i, m in enumerate(rfs_models):
         kw = "if" if i == 0 else "else if"
         L.append(f'    {kw} (entry.dist_type == "{m.name}")')
@@ -1241,6 +1259,19 @@ def gen_mex_function(clustering, icp_types):
         lines.append(f'    else if (cmd == "{cmd_name}") {{')
         lines.append(f"        plhs[0] = make_handle(cmd_create_{sn}(nrhs, prhs));")
         lines.append("    }")
+
+    if clustering:
+        lines.extend([
+            '    else if (cmd == "cluster_invoke") {',
+            '        if (nrhs < 3) mexErrMsgIdAndTxt("brew:badArgs", "cluster_invoke: handle, Z");',
+            "        auto obj = get_obj<clustering::ClusterBase>(get_handle(prhs[1]));",
+            "        Eigen::MatrixXd Z = to_eigen_mat(prhs[2]);",
+            "        std::vector<Eigen::MatrixXd> cells = obj->cluster(Z);",
+            "        plhs[0] = mxCreateCellMatrix(1, cells.size());",
+            "        for (std::size_t i = 0; i < cells.size(); ++i)",
+            "            mxSetCell(plhs[0], i, from_eigen_mat(cells[i]));",
+            "    }",
+        ])
 
     # ICP creation commands
     for ic in icp_types:
@@ -1386,7 +1417,8 @@ def _matlab_model_data_class(model: ModelDef, model_map: dict) -> str:
             ("mean", "Stacked state mean"),
             ("covariance", "Stacked state covariance"),
             ("state_dim", "Single-step state dimension"),
-            ("mean_history", "state_dim x T matrix of mean history"),
+            ("mean_history", "state_dim x T matrix of L-scan window means"),
+            ("state_history", "state_dim x M matrix of full-lifetime state means"),
         ]
         for f in base_extra + base_extract:
             all_props.append((f.name, ""))
@@ -1426,6 +1458,10 @@ def _matlab_model_data_class(model: ModelDef, model_map: dict) -> str:
         elif pname == "mean_history":
             from_lines.append(f"            if ~isempty(mix.mean_histories)")
             from_lines.append(f"                obj.mean_history = mix.mean_histories{{idx}};")
+            from_lines.append(f"            end")
+        elif pname == "state_history":
+            from_lines.append(f"            if ~isempty(mix.state_histories)")
+            from_lines.append(f"                obj.state_history = mix.state_histories{{idx}};")
             from_lines.append(f"            end")
         elif pname in ("alpha", "beta", "v"):
             from_lines.append(f"            obj.{pname} = mix.{pname}s(idx);")
@@ -1852,6 +1888,11 @@ def _matlab_clustering_class(c: ClusteringDef) -> str:
     sig = ", ".join(arg_names)
     mex_str = ", ".join(arg_names)
 
+    default_lines = [f"            if nargin < {pos}, {aname} = []; end"
+                     for pos, (aname, atype) in enumerate(c.args, start=1)
+                     if atype in ("ivec", "vec")]
+    defaults = ("\n".join(default_lines) + "\n") if default_lines else ""
+
     content = f"""\
 classdef {c.name} < handle
 %{c.name} Clustering object wrapper (auto-generated).
@@ -1862,7 +1903,11 @@ classdef {c.name} < handle
 
     methods
         function obj = {c.name}({sig})
-            obj.handle_ = brew_mex('create_{sn}', {mex_str});
+{defaults}            obj.handle_ = brew_mex('create_{sn}', {mex_str});
+        end
+
+        function cells = cluster(obj, Z)
+            cells = brew_mex('cluster_invoke', obj.handle_, Z);
         end
 
         function delete(obj)
@@ -1963,6 +2008,7 @@ def _matlab_mixture_data_class(models_list: list, model_map: dict) -> str:
             ctor_parts = ["raw.means{i}", "raw.covariances{i}"]
             ctor_parts.append("raw.state_dim")
             ctor_parts.append("raw.mean_histories{i}")
+            ctor_parts.append("raw.state_histories{i}")
             for f in base_extra:
                 if f.type == "scalar":
                     ctor_parts.append(f"raw.{f.matlab_name}(i)")
