@@ -227,9 +227,12 @@ def scan_headers(root: Path):
                         continue
                     if "trajectory" in tags:
                         base = tags["trajectory"]
+                        # Trajectory models are now concrete, window-first named types
+                        # (e.g. models::TrajectoryGaussian<W>) rather than the generic
+                        # Trajectory<Base<>, W> instantiation.
                         models_list.append(ModelDef(
                             name=name, header=header,
-                            cpp_type=f"models::Trajectory<models::{base}<>, {TRAJECTORY_MAX_WINDOW}>",
+                            cpp_type=f"models::{name}<{TRAJECTORY_MAX_WINDOW}>",
                             fields=[], is_trajectory=True, base_model=base,
                         ))
                     else:
