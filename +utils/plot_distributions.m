@@ -113,8 +113,13 @@ end
 
 %% ---- Trajectory Gaussian ----
 function plot_traj_gaussian_(comp, dims, ax, clr, ns, lw, ms, ls, wc, ww, ws)
-    if isempty(comp.mean_history), return; end
-    hist = comp.mean_history; sd = comp.state_dim;
+    % Draw the full-lifetime trail (state_history); the L-scan window
+    % (mean_history, the most recent window_size steps) is highlighted on top.
+    % Fall back to the window only when no full history was recorded.
+    hist = comp.state_history;
+    if isempty(hist), hist = comp.mean_history; end
+    if isempty(hist), return; end
+    sd = comp.state_dim;
     if sd == 0, sd = size(hist,1); end
     T = size(hist, 2);
     win_len = T;
@@ -151,8 +156,13 @@ end
 
 %% ---- Trajectory GGIW ----
 function plot_traj_ggiw_(comp, dims, ax, clr, hc, lw, ms, ls, wc, ww, ws)
-    if isempty(comp.mean_history), return; end
-    hist = comp.mean_history; sd = comp.state_dim;
+    % Draw the full-lifetime trail (state_history); the L-scan window
+    % (mean_history, the most recent window_size steps) is highlighted on top.
+    % Fall back to the window only when no full history was recorded.
+    hist = comp.state_history;
+    if isempty(hist), hist = comp.mean_history; end
+    if isempty(hist), return; end
+    sd = comp.state_dim;
     if sd == 0, sd = size(hist,1); end
     T = size(hist, 2);
     win_len = T;
