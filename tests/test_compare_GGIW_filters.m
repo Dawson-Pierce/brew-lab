@@ -204,8 +204,8 @@ if ~isempty(mix) && ~mix.isempty()
     for ci = 1:mix.length()
         comp = mix.components{ci};
         clr = traj_colors(ci,:);
-        if isempty(comp.mean_history), continue; end
-        hist = comp.mean_history;
+        hist = utils.trajectory_trail(comp);
+        if isempty(hist), continue; end
         sd = comp.state_dim;
         T = size(hist, 2);
 

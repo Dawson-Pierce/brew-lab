@@ -116,15 +116,9 @@ function plot_traj_gaussian_(comp, dims, ax, clr, ns, lw, ms, ls, wc, ww, ws)
     % Draw the full-lifetime trail (state_history); the L-scan window
     % (mean_history, the most recent window_size steps) is highlighted on top.
     % Fall back to the window only when no full history was recorded.
-    hist = comp.state_history;
-    if ~isempty(hist)
-        % state_history(:,1) is the birth prior (the seed location the track was
-        % born at), not an estimated state — drop it so the trail starts at the
-        % first real estimate instead of the generic birth location.
-        if size(hist, 2) > 1, hist = hist(:, 2:end); end
-    else
-        hist = comp.mean_history;
-    end
+    % Full estimated trajectory: the full state_history with the birth prior
+    % dropped and the current estimate appended (see utils.trajectory_trail).
+    hist = utils.trajectory_trail(comp);
     if isempty(hist), return; end
     sd = comp.state_dim;
     if sd == 0, sd = size(hist,1); end
@@ -166,15 +160,9 @@ function plot_traj_ggiw_(comp, dims, ax, clr, hc, lw, ms, ls, wc, ww, ws)
     % Draw the full-lifetime trail (state_history); the L-scan window
     % (mean_history, the most recent window_size steps) is highlighted on top.
     % Fall back to the window only when no full history was recorded.
-    hist = comp.state_history;
-    if ~isempty(hist)
-        % state_history(:,1) is the birth prior (the seed location the track was
-        % born at), not an estimated state — drop it so the trail starts at the
-        % first real estimate instead of the generic birth location.
-        if size(hist, 2) > 1, hist = hist(:, 2:end); end
-    else
-        hist = comp.mean_history;
-    end
+    % Full estimated trajectory: the full state_history with the birth prior
+    % dropped and the current estimate appended (see utils.trajectory_trail).
+    hist = utils.trajectory_trail(comp);
     if isempty(hist), return; end
     sd = comp.state_dim;
     if sd == 0, sd = size(hist,1); end

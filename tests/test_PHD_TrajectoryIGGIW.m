@@ -146,9 +146,10 @@ for k = 1:numel(t)
         last_state = comp.mean(end-sd+1:end);
         last_pos   = last_state(1:d);
 
-        % mean_history is state_dim x window_size — plot position rows.
-        if ~isempty(comp.mean_history)
-            plot(ax, comp.mean_history(1,:), comp.mean_history(2,:), ...
+        % Full estimated trajectory (state_history; birth prior dropped, current appended).
+        traj = utils.trajectory_trail(comp);
+        if ~isempty(traj)
+            plot(ax, traj(1,:), traj(2,:), ...
                 'r-', 'LineWidth', 1.8, ...
                 'DisplayName', sprintf('IGGIW #%d trajectory', ci));
         end
