@@ -1,4 +1,4 @@
-function build_brew()
+function build_brew(output_name)
 %BUILD_BREW Generate and compile the brew MEX gateway + MATLAB wrappers.
 %   1. Runs generate_mex.py to regenerate brew_mex.cpp and +BREW wrappers
 %      from @mex annotations in the C++ headers.
@@ -10,6 +10,13 @@ function build_brew()
 %
 %   Usage:
 %       build_brew
+
+    % Optional output MEX name (default brew_mex). Useful to build a test MEX
+    % without clobbering a brew_mex.mexw64 that is currently loaded/locked by
+    % another MATLAB session (run `clear mex` there first to rebuild the default).
+    if nargin < 1 || isempty(output_name)
+        output_name = 'brew_mex';
+    end
 
     here = fileparts(mfilename('fullpath'));
     brew_root = fullfile(here, 'brew');
@@ -112,7 +119,7 @@ function build_brew()
     end
 
     args = [{'-R2018a'} sources(:)' include_flags(:)' {cpp_flag} ...
-            {'-output', fullfile(here, 'brew_mex')}];
+            {'-output', fullfile(here, output_name)}];
 
     mex(args{:});
 

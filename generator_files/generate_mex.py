@@ -227,12 +227,12 @@ def scan_headers(root: Path):
                         continue
                     if "trajectory" in tags:
                         base = tags["trajectory"]
-                        # Trajectory models are now concrete, window-first named types
-                        # (e.g. models::TrajectoryGaussian<W>) rather than the generic
-                        # Trajectory<Base<>, W> instantiation.
+                        # Trajectory models are concrete named types with a
+                        # runtime window (default template args); the window is a
+                        # runtime ctor arg threaded through the mixture create.
                         models_list.append(ModelDef(
                             name=name, header=header,
-                            cpp_type=f"models::{name}<{TRAJECTORY_MAX_WINDOW}>",
+                            cpp_type=f"models::{name}<>",
                             fields=[], is_trajectory=True, base_model=base,
                         ))
                     else:
@@ -575,12 +575,9 @@ def gen_filter_creation(filters_list):
     ]
     for i, f in enumerate(filters_list):
         kw = "if" if i == 0 else "else if"
-        # Trajectory filters take MaxWindow as their first template parameter
-        # (no default).  Non-trajectory filters have all-default template args.
-        if f.dist.startswith("Trajectory"):
-            filter_inst = f"filters::{f.name}<{TRAJECTORY_MAX_WINDOW}>"
-        else:
-            filter_inst = f"filters::{f.name}<>"
+        # All filters use all-default template args; the trajectory window is a
+        # runtime value set via the window_size setter (@mex_setters).
+        filter_inst = f"filters::{f.name}<>"
         lines.append(f'    {kw} (ftype == "{f.name}") {{')
         lines.append(f"        auto f = std::make_shared<{filter_inst}>();")
         lines.append("        f->set_dynamics(dyn);")
@@ -738,6 +735,8 @@ def _gen_trajectory_mixture_create(model, model_map):
     lines.append(f'        "{model.name} mixture: wrong number of arguments");')
     lines.extend(decls)
     lines.append(f"    const mxArray* weights = prhs[{weight_idx}];")
+    lines.append(f"    int traj_window = (nrhs > {weight_idx + 1}) ? "
+                 f"static_cast<int>(mxGetScalar(prhs[{weight_idx + 1}])) : {TRAJECTORY_MAX_WINDOW};")
 
     first_cell = next((f for f in base.fields if f.type in ("vec", "mat")), None)
     if first_cell:
@@ -791,7 +790,7 @@ def _gen_trajectory_mixture_create(model, model_map):
     base_args = ", ".join(base_ctor)
     lines.append(f"        {base.cpp_type} base({base_args});")
     lines.append(f"        mix->add_component(")
-    lines.append(f"            std::make_unique<{model.cpp_type}>(state_dim, std::move(base)), w[i]);")
+    lines.append(f"            std::make_unique<{model.cpp_type}>(state_dim, std::move(base), traj_window), w[i]);")
     lines.append("    }")
     lines.append(f'    return store_obj(mix, "Mixture", "{model.name}");')
     lines.append("}")
@@ -1556,6 +1555,12 @@ def _matlab_mixture_class(model: ModelDef, model_map: dict) -> str:
 
     params.append("            addParameter(p, 'weights', []);")
     mex_args.append("p.Results.weights")
+
+    # Trajectory mixtures carry a runtime window size, threaded into every birth
+    # component's TrajectoryWindow ctor (the authoritative window owner).
+    if model.is_trajectory:
+        params.append("            addParameter(p, 'window_size', 5);")
+        mex_args.append("p.Results.window_size")
 
     params_str = "\n".join(params)
     conv_str = "\n".join(conversions)
