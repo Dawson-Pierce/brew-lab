@@ -54,33 +54,30 @@ function build_brew()
     % Start with the generated gateway
     sources = {fullfile(gen_dir, 'brew_mex.cpp')};
 
-    % Auto-discover .cpp files from relevant subtrees.
-    % Brew is now organised as src/brew/{core,advanced,desktop}/<subsystem>.
-    % We pull in core/ and advanced/ recursively; desktop/ is skipped because
-    % its plotting/IO sources depend on external libraries not needed by MEX.
+    % Auto-discover .cpp files. Brew is organised as flat per-model packages
+    % (gaussian/, ggiw/, trajectory_gaussian/, ...) plus shared/ and the
+    % standalone subsystems (dynamics/, clustering/, template_matching/,
+    % assignment/, metrics/) under src/brew/<pkg>. We pull in everything
+    % recursively except desktop/, whose plotting/IO sources depend on external
+    % libraries not needed by the MEX gateway.
     src_base = fullfile(brew_root, 'src', 'brew');
-    scan_roots = {'core', 'advanced'};
 
-    % Files to skip (I/O with external deps)
-    skip_patterns = {'point_cloud_io'};
+    % Path fragments to skip (desktop modules + I/O with external deps)
+    desktop_frag = [filesep 'desktop' filesep];
+    skip_patterns = {'point_cloud_io', desktop_frag};
 
-    for i = 1:numel(scan_roots)
-        root_dir = fullfile(src_base, scan_roots{i});
-        if ~isfolder(root_dir)
-            continue
+    cpps = dir(fullfile(src_base, '**', '*.cpp'));
+    for j = 1:numel(cpps)
+        full = fullfile(cpps(j).folder, cpps(j).name);
+        skip = false;
+        for k = 1:numel(skip_patterns)
+            if contains(full, skip_patterns{k})
+                skip = true;
+                break;
+            end
         end
-        cpps = dir(fullfile(root_dir, '**', '*.cpp'));
-        for j = 1:numel(cpps)
-            skip = false;
-            for k = 1:numel(skip_patterns)
-                if contains(cpps(j).name, skip_patterns{k})
-                    skip = true;
-                    break;
-                end
-            end
-            if ~skip
-                sources{end+1} = fullfile(cpps(j).folder, cpps(j).name); %#ok<AGROW>
-            end
+        if ~skip
+            sources{end+1} = full; %#ok<AGROW>
         end
     end
 

@@ -336,8 +336,8 @@ def gen_includes(dynamics, models_list, filters, rfs_types, clustering, icp_type
     for ic in icp_types:
         headers.add(ic.header)
     # Always include mixture and bernoulli
-    headers.add("brew/core/models/mixture.hpp")
-    headers.add("brew/core/models/bernoulli.hpp")
+    headers.add("brew/shared/mixture.hpp")
+    headers.add("brew/shared/bernoulli.hpp")
 
     for h in sorted(headers):
         lines.append(f'#include "{h}"')
