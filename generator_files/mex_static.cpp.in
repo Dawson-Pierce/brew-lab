@@ -148,6 +148,41 @@ static void cmd_rfs_cleanup(uint64_t handle) {
 }
 
 // ============================================================
+// Single-object filter operations (navigation / single-target use).
+// Gaussian filters only (EKF/UKF): the wrapper exposes these only for
+// dist_type == "Gaussian", so the handle is always a Filter<Gaussian<>>.
+// ============================================================
+
+static void cmd_filter_predict(int nrhs, const mxArray* prhs[],
+                               int nlhs, mxArray* plhs[]) {
+    // args: handle(1), dt(2), mean(3), covariance(4)
+    if (nrhs < 5)
+        mexErrMsgIdAndTxt("brew:badArgs", "filter_predict: handle, dt, mean, covariance");
+    auto filt = get_obj<filters::Filter<models::Gaussian<>>>(get_handle(prhs[1]));
+    const double dt = mxGetScalar(prhs[2]);
+    Eigen::VectorXd mean = to_eigen_vec(prhs[3]);
+    Eigen::MatrixXd cov = to_eigen_mat(prhs[4]);
+    auto next = filt->predict(dt, models::Gaussian<>(mean, cov));
+    plhs[0] = from_eigen_vec(next.mean());
+    if (nlhs > 1) plhs[1] = from_eigen_mat(next.covariance());
+}
+
+static void cmd_filter_correct(int nrhs, const mxArray* prhs[],
+                               int nlhs, mxArray* plhs[]) {
+    // args: handle(1), measurement(2), mean(3), covariance(4)
+    if (nrhs < 5)
+        mexErrMsgIdAndTxt("brew:badArgs", "filter_correct: handle, measurement, mean, covariance");
+    auto filt = get_obj<filters::Filter<models::Gaussian<>>>(get_handle(prhs[1]));
+    Eigen::VectorXd meas = to_eigen_vec(prhs[2]);
+    Eigen::VectorXd mean = to_eigen_vec(prhs[3]);
+    Eigen::MatrixXd cov = to_eigen_mat(prhs[4]);
+    auto res = filt->correct(meas, models::Gaussian<>(mean, cov));
+    plhs[0] = from_eigen_vec(res.distribution.mean());
+    if (nlhs > 1) plhs[1] = from_eigen_mat(res.distribution.covariance());
+    if (nlhs > 2) plhs[2] = mxCreateDoubleScalar(res.likelihood);
+}
+
+// ============================================================
 // Track history helper
 // ============================================================
 

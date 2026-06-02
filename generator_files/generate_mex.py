@@ -1301,6 +1301,14 @@ def gen_mex_function(clustering, icp_types):
         "        plhs[0] = make_handle(cmd_create_rfs(nrhs, prhs));",
         "    }",
         "",
+        "    // --- Single-object filter operations (navigation; Gaussian filters) ---",
+        '    else if (cmd == "filter_predict") {',
+        "        cmd_filter_predict(nrhs, prhs, nlhs, plhs);",
+        "    }",
+        '    else if (cmd == "filter_correct") {',
+        "        cmd_filter_correct(nrhs, prhs, nlhs, plhs);",
+        "    }",
+        "",
         "    // --- RFS operations ---",
         '    else if (cmd == "rfs_predict") {',
         '        if (nrhs < 3) mexErrMsgIdAndTxt("brew:badArgs", "rfs_predict: handle, dt");',
@@ -1822,6 +1830,39 @@ def _matlab_filter_class(filt: FilterDef) -> str:
     end
 """
 
+    # Single-object predict/correct: real implementations for Gaussian filters
+    # (EKF/UKF) via the filter_predict/filter_correct MEX commands; a clear error
+    # for non-Gaussian filters (whose single distribution is not just mean+cov).
+    if dist == "Gaussian":
+        predict_correct = """\
+        function nextDist = predict(obj, dt, prevDist)
+            %PREDICT Single-object filter predict step (navigation use).
+            %   prevDist: BREW.models.Gaussian   returns: BREW.models.Gaussian
+            [m, c] = brew_mex('filter_predict', obj.handle_, dt, ...
+                prevDist.mean, prevDist.covariance);
+            nextDist = BREW.models.Gaussian(m, c);
+        end
+
+        function [nextDist, likelihood] = correct(obj, meas, prevDist)
+            %CORRECT Single-object filter correct step (navigation use).
+            %   meas: measurement vector   prevDist: BREW.models.Gaussian
+            %   returns: BREW.models.Gaussian, scalar likelihood
+            [m, c, likelihood] = brew_mex('filter_correct', obj.handle_, meas, ...
+                prevDist.mean, prevDist.covariance);
+            nextDist = BREW.models.Gaussian(m, c);
+        end"""
+    else:
+        predict_correct = f"""\
+        function nextDist = predict(obj, dt, prevDist) %#ok<STOUT,INUSD>
+            error('BREW:notImplemented', ...
+                '{name}.predict (standalone) is only supported for Gaussian filters (EKF/UKF).');
+        end
+
+        function [nextDist, likelihood] = correct(obj, meas, prevDist) %#ok<STOUT,INUSD>
+            error('BREW:notImplemented', ...
+                '{name}.correct (standalone) is only supported for Gaussian filters (EKF/UKF).');
+        end"""
+
     content = f"""\
 classdef {name} < handle
 %{name} Filter wrapper (auto-generated).
@@ -1857,26 +1898,7 @@ classdef {name} < handle
                 p.Results.H, p.Results.measurement_noise{mex_extra});
         end
 
-        function nextDist = predict(obj, dt, prevDist) %#ok<STOUT,INUSD>
-            %PREDICT Filter predict step.
-            %   prevDist: BREW.models.{dist}
-            %   returns:  BREW.models.{dist}
-            %
-            %   Override in a subclass to implement MATLAB-side prediction.
-            error('BREW:notImplemented', ...
-                '{name}.predict is not implemented. Subclass {name} and override this method.');
-        end
-
-        function [nextDist, likelihood] = correct(obj, meas, prevDist) %#ok<STOUT,INUSD>
-            %CORRECT Filter correct step.
-            %   meas:     measurement vector or matrix
-            %   prevDist: BREW.models.{dist}
-            %   returns:  BREW.models.{dist}, scalar likelihood
-            %
-            %   Override in a subclass to implement MATLAB-side correction.
-            error('BREW:notImplemented', ...
-                '{name}.correct is not implemented. Subclass {name} and override this method.');
-        end
+{predict_correct}
 
         function delete(obj)
             if obj.handle_ ~= 0
