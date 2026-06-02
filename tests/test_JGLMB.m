@@ -52,12 +52,12 @@ for k = 1:numel(t)
 end
 
 %% Run the JGLMB with each joint-update strategy over identical measurements
-[estM, cardM, timeM] = run_jglmb(meas, t, dt, false, xb, yb);
+[estM, cardM, timeM, tracksM] = run_jglmb(meas, t, dt, false, xb, yb);
 
 gibbs_ok = true;
-estG = {}; cardG = []; timeG = NaN;
+estG = {}; cardG = []; timeG = NaN; tracksG = [];
 try
-    [estG, cardG, timeG] = run_jglmb(meas, t, dt, true, xb, yb);
+    [estG, cardG, timeG, tracksG] = run_jglmb(meas, t, dt, true, xb, yb);
 catch ME
     gibbs_ok = false;
     fprintf(['[note] Gibbs update unavailable in this build ' ...
@@ -114,8 +114,17 @@ grid on; xlabel('t'); ylabel('estimated cardinality');
 title('JGLMB estimated cardinality'); legend('Location', 'best');
 saveas(cfig, fullfile(out_dir, 'JGLMB_cardinality.png'));
 
+%% Labeled track trajectories (JGLMB keeps labeled histories, unlike a PHD)
+tfig = figure('Position', [100 100 1000 460]);
+draw_traj_panel(subplot(1, n_panel, 1), 'JGLMB (Murty)', truth_hist, tracksM, xb, yb);
+if gibbs_ok
+    draw_traj_panel(subplot(1, n_panel, 2), 'JGLMB (Gibbs)', truth_hist, tracksG, xb, yb);
+end
+sgtitle('JGLMB labeled track trajectories (truth = black)');
+saveas(tfig, fullfile(out_dir, 'JGLMB_trajectories.png'));
+
 %% ---- Local functions ----
-function [ests, card, elapsed] = run_jglmb(meas, t, dt, use_gibbs, xb, yb)
+function [ests, card, elapsed, tracks] = run_jglmb(meas, t, dt, use_gibbs, xb, yb)
     % Fresh inner filter + birth model per run (each JGLMB copies/clones them).
     ekf = BREW.filters.EKF( ...
         'dyn_obj', BREW.dynamics.SingleIntegrator(2), ...
@@ -149,6 +158,7 @@ function [ests, card, elapsed] = run_jglmb(meas, t, dt, use_gibbs, xb, yb)
         card(k) = ests{k}.length();
     end
     elapsed = toc(tstart);
+    tracks = jglmb.track_histories();   % labeled track histories (JGLMB keeps identity)
 end
 
 function draw_panel(ax, ttl, truth_state, z, est_mix, xb, yb)
@@ -168,6 +178,21 @@ function draw_panel(ax, ttl, truth_state, z, est_mix, xb, yb)
     end
     xlim(ax, xb); ylim(ax, yb);
     title(ax, sprintf('%s  (tracks=%d)', ttl, est_mix.length()));
+end
+
+function draw_traj_panel(ax, ttl, truth_hist, tracks, xb, yb)
+    cla(ax); hold(ax, 'on'); grid(ax, 'on');
+    % Truth trajectories: one polyline per target across all timesteps.
+    nt = numel(truth_hist{1});
+    for ii = 1:nt
+        tx = cellfun(@(s) s{ii}(1), truth_hist);
+        ty = cellfun(@(s) s{ii}(2), truth_hist);
+        plot(ax, tx, ty, 'k-', 'LineWidth', 1.2);
+    end
+    % Estimated labeled tracks (skip transient 1-step tracks from clutter).
+    utils.plot_track_histories(tracks, [1 2], 'ax', ax, 'LineWidth', 2, 'min_len', 2);
+    xlim(ax, xb); ylim(ax, yb);
+    title(ax, sprintf('%s  (%d tracks)', ttl, numel(tracks)));
 end
 
 function x = propagate_si(dt, x, dims)
