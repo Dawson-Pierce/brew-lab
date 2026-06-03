@@ -1,25 +1,5 @@
 function plot_track_histories(tracks, dims, varargin)
 %PLOT_TRACK_HISTORIES Plot labeled track trajectories from a label-aware RFS.
-%   utils.plot_track_histories(tracks, dims, 'Name', Value, ...)
-%
-%   GLMB and JGLMB maintain labeled tracks over time, exposed via their
-%   track_histories() method. Unlike the PHD/CPHD (which estimate a label-free
-%   set each step), these filters can draw genuine trajectories — each labeled
-%   track's path through its per-step state means, with an endpoint marker and
-%   its track ID.
-%
-%   tracks : struct array (from rfs.track_histories()) with fields
-%              .id     - integer/label
-%              .states - 1xT cell of state-mean column vectors
-%   dims   : state indices to plot ([d1 d2] for 2D, [d1 d2 d3] for 3D)
-%
-%   Name-Value:
-%     'ax'         - axes handle (default gca)
-%     'colors'     - Nx3 color matrix (default lines(numTracks))
-%     'LineWidth'  - trajectory line width (default 1.5)
-%     'MarkerSize' - endpoint marker size (default 6)
-%     'show_id'    - annotate each endpoint with its track ID (default true)
-%     'min_len'    - skip tracks shorter than this many steps (default 1)
 
     if nargin < 2 || isempty(dims), dims = [1 2]; end
     ip = inputParser; ip.KeepUnmatched = true;
@@ -47,7 +27,7 @@ function plot_track_histories(tracks, dims, varargin)
     for tr = 1:n
         states = tracks(tr).states;
         if isempty(states) || numel(states) < ip.Results.min_len, continue; end
-        xy = cell2mat(states);          % state_dim x T (states is a 1xT row cell)
+        xy = cell2mat(states);
         clr = colors(tr, :);
         if is3d
             plot3(ax, xy(d1, :), xy(d2, :), xy(d3, :), '-', 'Color', clr, 'LineWidth', lw);

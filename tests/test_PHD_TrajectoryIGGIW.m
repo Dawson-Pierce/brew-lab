@@ -1,18 +1,5 @@
 %% Trajectory PHD-IGGIW on a gridded intensity field (storm-cell scenario)
-% Same scenario as test_PHD_IGGIW.m, but using the trajectory variant of
-% the filter so each track carries a smoothed window of past states.
-%
-% Pipeline per timestep:
-%   1. Sample a 2D intensity field (storm cells + offset hot spots + noise).
-%   2. Pre-threshold the image to select supra-threshold pixels.
-%   3. Pack pixels as [x; y; intensity*scale] columns and pass to the PHD.
-%   4. PHD's DBSCAN partitions columns into per-cell groups, fed to
-%      TrajectoryIGGIWEKF which batch-updates the stacked smoothed window.
-%
-% The trajectory variant exposes each track's mean_history (state_dim x
-% window_size), so we plot the smoothed tail behind each track centroid.
 
-% clear; clc;
 close all
 rng(7);
 
@@ -45,7 +32,7 @@ H   = [eye(2), zeros(2,2)];
 R   = 0.1 * eye(2);
 Q   = blkdiag(1e-3*eye(2), 5e-3*eye(2));
 
-centroid_power = 3.0;  % bias z_bar toward the hot spot
+centroid_power = 3.0;
 
 inner = BREW.filters.TrajectoryIGGIWEKF( ...
     'dyn_obj', dyn, 'H', H, ...
@@ -80,7 +67,7 @@ phd = BREW.multi_target.PHD( ...
 phd.set_cluster_object(BREW.clustering.DBSCAN(2.0, 4));
 
 %% Animation
-animate  = 1;  % 1 = write an animated GIF next to this script in tests/output
+animate  = 1;
 out_dir  = fullfile(fileparts(mfilename('fullpath')), 'output');
 gif_file = fullfile(out_dir, 'PHD_TrajectoryIGGIW.gif');
 if animate && ~isfolder(out_dir)
@@ -100,12 +87,10 @@ t  = 0:dt:15;
 for k = 1:numel(t)
     cla(ax);
 
-    % --- Propagate truth ---
     for ti = 1:numel(truth)
         truth(ti).mean = propagate_si(dt, truth(ti).mean, 2);
     end
 
-    % --- Sample gridded intensity field ---
     field_intensity = intensity_noise * randn(1, size(grid_xy, 2));
     for ti = 1:numel(truth)
         dx = grid_xy - truth(ti).mean(1:2);
@@ -121,7 +106,6 @@ for k = 1:numel(t)
     imagesc(ax, xg(1,:), yg(:,1), reshape(field_intensity, size(xg)));
     set(ax,'YDir','normal'); colorbar(ax);
 
-    % --- Threshold and pack measurements ---
     keep = field_intensity > detect_thresh;
     meas_xy  = grid_xy(:, keep);
     meas_int = field_intensity(keep);
@@ -131,22 +115,17 @@ for k = 1:numel(t)
         measurements = zeros(3, 0);
     end
 
-    % --- PHD step ---
     phd.predict(dt);
     phd.correct(measurements);
     est_mix = phd.cleanup();
 
-    % --- Overlay trajectory estimates on the reflectivity image ---
     for ci = 1:est_mix.length()
         comp = est_mix.components{ci};
         sd = comp.state_dim;
         d  = size(comp.V, 1);
-        % Last per-step state block lives at the tail of the stacked mean;
-        % first d entries of that block are the kinematic position.
         last_state = comp.mean(end-sd+1:end);
         last_pos   = last_state(1:d);
 
-        % Full estimated trajectory (state_history; birth prior dropped, current appended).
         traj = utils.trajectory_trail(comp);
         if ~isempty(traj)
             plot(ax, traj(1,:), traj(2,:), ...
@@ -169,7 +148,6 @@ for k = 1:numel(t)
         t(k), est_mix.length(), nnz(keep), centroid_power));
     drawnow;
 
-    % --- Animation frame ---
     if animate
         [A, map] = rgb2ind(frame2im(getframe(fig)), 256);
         if k == 1

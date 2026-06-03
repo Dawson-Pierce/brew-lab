@@ -1,6 +1,5 @@
 %% Testing PHD script (GGIW)
 
-% clear; clc; 
 close all
 
 %% Truth model setup
@@ -14,7 +13,6 @@ truth.components = {
 };
 truth.weights = [1, 1, 1];
 
-% Dynamics
 dyn = BREW.dynamics.SingleIntegrator(3);
 
 dt = 0.2;
@@ -60,29 +58,22 @@ gifFile = fullfile('tests','output', 'GGIW_PHD_3D.gif');
 for k = 1:length(t)
     cla(ax);
 
-    % Propagate truth
     for kk = 1:truth.length()
         c = truth.components{kk};
         c.mean = propagate_si(dt, c.mean, 3);
         truth.components{kk} = c;
     end
 
-    % Generate measurements
-    measurements{k} = utils.sample_measurements(truth); %#ok<SAGROW>
+    measurements{k} = utils.sample_measurements(truth);
     scatter3(measurements{k}(1,:), measurements{k}(2,:), measurements{k}(3,:), 'k*', 'SizeData', 0.5)
 
-    % PHD filter
     phd.predict(dt);
     phd.correct(dt, measurements{k});
     est_mix = phd.cleanup();
 
-    % fprintf("timestep: %f \n", t(k))
-    % disp(est_mix.weights)
-
     utils.plot_distributions(est_mix, [1, 2, 3], 'ax', ax);
     drawnow;
 
-    % GIF
     frame = getframe(f);
     img = frame2im(frame);
     [A, map] = rgb2ind(img, 256);

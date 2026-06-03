@@ -1,6 +1,5 @@
 %% Testing PHD script (Trajectory GGIW)
 
-% clear; clc; 
 close all
 
 %% Truth model setup (GGIW for propagation)
@@ -38,7 +37,7 @@ birth_model = BREW.models.TrajectoryGGIWMixture( ...
     'alphas', {10}, 'betas', {1}, 'vs', {10}, ...
     'Vs', {eye(3)}, ...
     'weights', [0.001], ...
-    'window_size', 20);   % runtime L-scan window (owned by the trajectory mixture)
+    'window_size', 20);
 
 %% PHD setup
 
@@ -56,18 +55,15 @@ gifFile = fullfile('tests','output', 'TrajectoryGGIW_PHD_3D.gif');
 for k = 1:length(t)
     cla(ax);
 
-    % Propagate truth
     for kk = 1:truth.length()
         c = truth.components{kk};
         c.mean = propagate_si(dt, c.mean, 3);
         truth.components{kk} = c;
     end
 
-    % Generate measurements
-    measurements{k} = utils.sample_measurements(truth); %#ok<SAGROW>
+    measurements{k} = utils.sample_measurements(truth);
     scatter3(measurements{k}(1,:), measurements{k}(2,:), measurements{k}(3,:), 'k.', 'SizeData', 0.5)
 
-    % PHD filter
     phd.predict(dt);
     phd.correct(dt, measurements{k});
     est_mix = phd.cleanup();
@@ -75,7 +71,6 @@ for k = 1:length(t)
     utils.plot_distributions(est_mix, [1, 2, 3], 'ax', ax, 'window_color', 'r', 'window_width', 1.6);
     drawnow;
 
-    % GIF
     frame = getframe(f);
     img = frame2im(frame);
     [A, map] = rgb2ind(img, 256);

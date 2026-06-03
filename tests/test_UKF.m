@@ -1,16 +1,4 @@
 %% MATLAB UKF navigation test: single-target tracking of a coordinated turn
-% Standalone single-object use (NO RFS): a UKF predicts/corrects a single
-% BREW.models.Gaussian to track a turning target with the nonlinear
-% CoordinatedTurn model, recovering the UNKNOWN turn rate omega from position-only
-% measurements (starting from a wrong, zero guess). Compared against an EKF, which
-% cannot recover omega — its F(omega) Jacobian does not couple omega to the
-% measured position. This is the MATLAB analogue of the C++ UKFTest.CoordinatedTurn.
-%
-% Requires a MEX built with the standalone filter predict/correct exposure
-% ("Stage 2"): run  clear mex; build_brew  first. If the loaded MEX predates it,
-% the script prints a note and exits cleanly.
-%
-% Run from the project root (the folder with +BREW).
 close all
 rng(7);
 
@@ -31,7 +19,7 @@ N  = 40;
 true_omega = 0.08;
 meas_std = sqrt(0.5);
 
-x = [0; 0; 10; 0; true_omega];            % [x, y, vx, vy, omega]
+x = [0; 0; 10; 0; true_omega];
 truth = zeros(5, N);
 meas  = zeros(2, N);
 for k = 1:N
@@ -44,8 +32,8 @@ end
 H  = [eye(2), zeros(2, 3)];
 Q  = diag([0, 0, 0.01, 0.01, 1e-3]);
 R  = 0.5 * eye(2);
-m0 = [0; 0; 10; 0; 0];                     % omega guessed as 0 (wrong)
-P0 = diag([1, 1, 1, 1, 0.5]);              % large initial omega uncertainty
+m0 = [0; 0; 10; 0; 0];
+P0 = diag([1, 1, 1, 1, 0.5]);
 
 dyn = BREW.dynamics.CoordinatedTurn();
 ukf = BREW.filters.UKF('dyn_obj', dyn, 'H', H, 'process_noise', Q, 'measurement_noise', R);

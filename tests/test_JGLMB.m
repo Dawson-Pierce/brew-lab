@@ -1,27 +1,16 @@
 %% JGLMB MATLAB test (Gaussian point targets): Murty vs Gibbs joint update
-% Tracks three crossing 2D targets in clutter with the JGLMB filter, exercising
-% both the exact Murty ranked-assignment update (default) and the Gibbs-sampler
-% update (set via 'use_gibbs', true). Both filters are run over the SAME
-% pre-generated measurements so the two updates can be compared directly.
-%
-% NOTE: the 'use_gibbs' option requires a MEX built from the commit that added it
-% (run: clear mex; build_brew). If the loaded MEX predates it, the script runs
-% the Murty update only and prints a note instead of failing.
-%
-% Run from the project root (the folder containing +BREW and +utils).
 close all
-rng(7);   % reproducible detections + clutter
+rng(7);
 
 %% Scenario
 dt = 1;
 t  = 0:dt:60;
-xb = [-10 80];          % field x-bounds (also the clutter region)
-yb = [-45 45];          % field y-bounds
+xb = [-10 80];
+yb = [-45 45];
 meas_cov = diag([0.25, 0.25]);
 p_detect = 0.95;
-clutter_lambda = 3;     % expected clutter points per scan
+clutter_lambda = 3;
 
-% Three targets [x; y; vx; vy], all present for the whole run.
 truth0 = { [0; -25; 1;  0.6]
            [0;  25; 1; -0.6]
            [0;   0; 1.2; 0  ] };
@@ -40,13 +29,13 @@ for k = 1:numel(t)
     z = [];
     for ii = 1:n_truth
         if rand < p_detect
-            z = [z, mvnrnd(state{ii}(1:2)', meas_cov)']; %#ok<AGROW>
+            z = [z, mvnrnd(state{ii}(1:2)', meas_cov)'];
         end
     end
     n_clut = poissrnd(clutter_lambda);
     if n_clut > 0
         z = [z, [rand(1, n_clut) * diff(xb) + xb(1); ...
-                 rand(1, n_clut) * diff(yb) + yb(1)]]; %#ok<AGROW>
+                 rand(1, n_clut) * diff(yb) + yb(1)]];
     end
     meas{k} = z;
 end
@@ -66,7 +55,7 @@ catch ME
 end
 
 %% Summary
-back = max(1, numel(t) - 20) : numel(t);   % steady-state window
+back = max(1, numel(t) - 20) : numel(t);
 fprintf('\n===== JGLMB tracking (truth cardinality = %d) =====\n', n_truth);
 fprintf('  Murty update: %.3f s (%.2f ms/step), final card=%d, mean card(last %d)=%.2f\n', ...
     timeM, 1000*timeM/numel(t), cardM(end), numel(back), mean(cardM(back)));
@@ -125,14 +114,12 @@ saveas(tfig, fullfile(out_dir, 'JGLMB_trajectories.png'));
 
 %% ---- Local functions ----
 function [ests, card, elapsed, tracks] = run_jglmb(meas, t, dt, use_gibbs, xb, yb)
-    % Fresh inner filter + birth model per run (each JGLMB copies/clones them).
     ekf = BREW.filters.EKF( ...
         'dyn_obj', BREW.dynamics.SingleIntegrator(2), ...
         'process_noise', diag([0.1 0.1 0.1 0.05]), ...
         'H', [1 0 0 0; 0 1 0 0], ...
         'measurement_noise', 0.25 * eye(2));
 
-    % Birth covers each target's appearance region.
     birth = BREW.models.GaussianMixture( ...
         'means', {[0; -25; 1; 0]; [0; 25; 1; 0]; [0; 0; 1; 0]}, ...
         'covariances', {diag([9 9 1 1]), diag([9 9 1 1]), diag([9 9 1 1])}, ...
@@ -158,21 +145,18 @@ function [ests, card, elapsed, tracks] = run_jglmb(meas, t, dt, use_gibbs, xb, y
         card(k) = ests{k}.length();
     end
     elapsed = toc(tstart);
-    tracks = jglmb.track_histories();   % labeled track histories (JGLMB keeps identity)
+    tracks = jglmb.track_histories();
 end
 
 function draw_panel(ax, ttl, truth_state, z, est_mix, xb, yb)
     cla(ax); hold(ax, 'on'); grid(ax, 'on');
-    % truth
     for ii = 1:numel(truth_state)
         plot(ax, truth_state{ii}(1), truth_state{ii}(2), 'k^', ...
             'MarkerFaceColor', 'k', 'MarkerSize', 6);
     end
-    % measurements
     if ~isempty(z)
         scatter(ax, z(1, :), z(2, :), 12, 'k*');
     end
-    % estimates
     if est_mix.length() > 0
         utils.plot_distributions(est_mix, [1 2], 'ax', ax, 'c', [0.85 0.1 0.1]);
     end
@@ -182,14 +166,12 @@ end
 
 function draw_traj_panel(ax, ttl, truth_hist, tracks, xb, yb)
     cla(ax); hold(ax, 'on'); grid(ax, 'on');
-    % Truth trajectories: one polyline per target across all timesteps.
     nt = numel(truth_hist{1});
     for ii = 1:nt
         tx = cellfun(@(s) s{ii}(1), truth_hist);
         ty = cellfun(@(s) s{ii}(2), truth_hist);
         plot(ax, tx, ty, 'k-', 'LineWidth', 1.2);
     end
-    % Estimated labeled tracks (skip transient 1-step tracks from clutter).
     utils.plot_track_histories(tracks, [1 2], 'ax', ax, 'LineWidth', 2, 'min_len', 2);
     xlim(ax, xb); ylim(ax, yb);
     title(ax, sprintf('%s  (%d tracks)', ttl, numel(tracks)));

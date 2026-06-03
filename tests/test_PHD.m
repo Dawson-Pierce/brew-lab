@@ -1,4 +1,4 @@
-% clear; clc; 
+% clear; clc;
 close all
 
 %% Target setup (truth model)
@@ -47,7 +47,6 @@ gifFile = fullfile('tests','output', 'gm.gif');
 
 for k = 1:length(t)
 
-    % Propagate truth
     for ii = 1:truth.length()
         c = truth.components{ii};
         c.mean = propagate_si(dt, c.mean, 2);
@@ -55,13 +54,12 @@ for k = 1:length(t)
     end
 
     meas = utils.sample_measurements(truth, [1, 2], meas_cov);
-    meas_hst = [meas_hst, meas]; %#ok<AGROW>
+    meas_hst = [meas_hst, meas];
 
     phd.predict(dt);
     phd.correct(dt, meas);
     est_mix = phd.cleanup();
 
-    % Plotting
     scatter(meas_hst(1,:), meas_hst(2,:), 'k*'); grid on; hold on
     utils.plot_distributions(est_mix, [1 2]);
     hold off

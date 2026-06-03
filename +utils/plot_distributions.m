@@ -1,21 +1,5 @@
 function plot_distributions(mix, plt_inds, varargin)
 %PLOT_DISTRIBUTIONS Plot mixture components.
-%   utils.plot_distributions(mix, plt_inds, 'Name', Value, ...)
-%
-%   Dispatches on mix.dist_type to plot Gaussian ellipses, GGIW extents,
-%   trajectory paths, etc.
-%
-%   Name-Value pairs:
-%     'ax'           - axes handle (default gca)
-%     'colors'/'c'   - Nx3 color matrix or single color
-%     'LineWidth'    - default 2
-%     'MarkerSize'   - default 4
-%     'num_std'      - std devs for Gaussian ellipse (default 2)
-%     'h'            - confidence for GGIW chi2 (default 0.95)
-%     'window_color' - trajectory window highlight color
-%     'window_width' - trajectory window line width
-%     'window_style' - trajectory window line style (default '-')
-%     'LineStyle'    - default '-'
 
     if nargin < 2, plt_inds = 1; end
 
@@ -113,11 +97,6 @@ end
 
 %% ---- Trajectory Gaussian ----
 function plot_traj_gaussian_(comp, dims, ax, clr, ns, lw, ms, ls, wc, ww, ws)
-    % Draw the full-lifetime trail (state_history); the L-scan window
-    % (mean_history, the most recent window_size steps) is highlighted on top.
-    % Fall back to the window only when no full history was recorded.
-    % Full estimated trajectory: the full state_history with the birth prior
-    % dropped and the current estimate appended (see utils.trajectory_trail).
     hist = utils.trajectory_trail(comp);
     if isempty(hist), return; end
     sd = comp.state_dim;
@@ -136,7 +115,6 @@ function plot_traj_gaussian_(comp, dims, ax, clr, ns, lw, ms, ls, wc, ww, ws)
         if ~isempty(wc), plot(ax, hist(d1,wi), hist(d2,wi), ws, 'Color', wc, 'LineWidth', ww);
         else, plot(ax, hist(d1,wi), hist(d2,wi), ls, 'Color', clr, 'LineWidth', lw); end
         plot(ax, hist(d1,end), hist(d2,end), 'o', 'Color', clr, 'MarkerFaceColor', clr, 'MarkerSize', ms);
-        % Terminal covariance ellipse
         if ~isempty(comp.covariance)
             C = comp.covariance; nT = size(C,1);
             if nT >= sd
@@ -157,11 +135,6 @@ end
 
 %% ---- Trajectory GGIW ----
 function plot_traj_ggiw_(comp, dims, ax, clr, hc, lw, ms, ls, wc, ww, ws)
-    % Draw the full-lifetime trail (state_history); the L-scan window
-    % (mean_history, the most recent window_size steps) is highlighted on top.
-    % Fall back to the window only when no full history was recorded.
-    % Full estimated trajectory: the full state_history with the birth prior
-    % dropped and the current estimate appended (see utils.trajectory_trail).
     hist = utils.trajectory_trail(comp);
     if isempty(hist), return; end
     sd = comp.state_dim;

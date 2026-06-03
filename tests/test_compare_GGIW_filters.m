@@ -1,12 +1,11 @@
 %% Comparison: GGIW-PHD vs Trajectory-GGIW-PHD vs GGIW-GLMB (2D)
-% Runs all three filters on the same scenario and compares runtimes.
 
 close all
 
 %% Scenario setup (2D extended targets)
 
-state_dim = 4; % [x, y, vx, vy]
-ext_dim = 2;   % 2D extent
+state_dim = 4;
+ext_dim = 2;
 
 truth = BREW.models.Mixture();
 truth.dist_type = "GGIW";
@@ -62,13 +61,13 @@ birth_traj = BREW.models.TrajectoryGGIWMixture( ...
     'means', {birth_mean}, 'covariances', {birth_cov}, ...
     'vs', {birth_v}, 'Vs', {birth_V}, ...
     'weights', [0.05], ...
-    'window_size', 5);   % runtime L-scan window (owned by the trajectory mixture)
+    'window_size', 5);
 
 birth_glmb = BREW.models.GGIWMixture( ...
     'alphas', {birth_alpha}, 'betas', {1}, ...
     'means', {birth_mean}, 'covariances', {birth_cov}, ...
     'vs', {birth_v}, 'Vs', {birth_V}, ...
-    'weights', [0.1]);  % higher for Bernoulli existence probability
+    'weights', [0.1]);
 
 %% Create RFS filters
 
@@ -103,7 +102,6 @@ for k = 1:N
     measurements{k} = utils.sample_measurements(truth, [1, 2]);
 end
 
-% Reset truth for cardinality plot reference
 truth.components = {
     BREW.models.GGIW(20, 1, [0; 0; 1; 0.5],   0.01*eye(state_dim), 10, [4 0; 0 3])
     BREW.models.GGIW(20, 1, [10; 10; -0.5; 0], 0.01*eye(state_dim), 10, [3 0; 0 5])
@@ -112,7 +110,6 @@ truth.components = {
 
 %% Run filters and time them
 
-% --- GGIW-PHD ---
 fprintf('Running GGIW-PHD...\n');
 est_phd = cell(1, N);
 tic;
@@ -123,7 +120,6 @@ for k = 1:N
 end
 time_phd = toc;
 
-% --- Trajectory-GGIW-PHD ---
 fprintf('Running Trajectory-GGIW-PHD...\n');
 est_traj = cell(1, N);
 tic;
@@ -134,7 +130,6 @@ for k = 1:N
 end
 time_traj = toc;
 
-% --- GGIW-GLMB ---
 fprintf('Running GGIW-GLMB...\n');
 est_glmb = cell(1, N);
 tic;
@@ -156,7 +151,7 @@ fprintf('==============================\n');
 
 %% Plot estimates with extent history
 
-plot_every = 1;  % plot extent snapshot every N steps (tune this)
+plot_every = 1;
 plot_dims = [1, 2];
 d1 = plot_dims(1); d2 = plot_dims(2);
 
@@ -172,13 +167,11 @@ for p = 1:3
     title(axes_h(p), sprintf('%s (%.1f ms/step)', titles{p}, 1000*times(p)/N));
     xlabel(axes_h(p), 'X'); ylabel(axes_h(p), 'Y');
 
-    % Measurements (light gray background)
     for k = 1:N
         scatter(axes_h(p), measurements{k}(1,:), measurements{k}(2,:), 1, [0.85 0.85 0.85], '.');
     end
 end
 
-% --- Panel 1: GGIW-PHD (extent snapshots every plot_every steps) ---
 ax1 = axes_h(1);
 snap_steps = plot_every:plot_every:N;
 if snap_steps(end) ~= N, snap_steps(end+1) = N; end
@@ -187,16 +180,15 @@ for si = 1:n_snaps
     k = snap_steps(si);
     mix = est_phd{k};
     if isempty(mix) || mix.isempty(), continue; end
-    alpha_fade = 0.3 + 0.7 * (si / n_snaps);  % fade: older = lighter
+    alpha_fade = 0.3 + 0.7 * (si / n_snaps);
     lw = 1 + 1.5 * (si / n_snaps);
     for ci = 1:mix.length()
         comp = mix.components{ci};
-        clr = lines(1);  % single color, fade with time
+        clr = lines(1);
         plot_ggiw_extent_(ax1, comp, plot_dims, clr, alpha_fade, lw);
     end
 end
 
-% --- Panel 2: Trajectory-GGIW-PHD (trajectory paths + extent snapshots along history) ---
 ax2 = axes_h(2);
 mix = est_traj{end};
 if ~isempty(mix) && ~mix.isempty()
@@ -209,28 +201,23 @@ if ~isempty(mix) && ~mix.isempty()
         sd = comp.state_dim;
         T = size(hist, 2);
 
-        % Full trajectory path
         plot(ax2, hist(d1,:), hist(d2,:), '-', 'Color', clr, 'LineWidth', 1.5);
 
-        % Extent snapshots along the history at regular intervals
         snap_idx = plot_every:plot_every:T;
         if isempty(snap_idx) || snap_idx(end) ~= T, snap_idx(end+1) = T; end
         for si = 1:numel(snap_idx)
             ti = snap_idx(si);
             alpha_fade = 0.3 + 0.7 * (si / numel(snap_idx));
             lw = 1 + 1.5 * (si / numel(snap_idx));
-            % Use the terminal extent (V) centered at this history point
             mu_ti = hist(plot_dims, ti);
             plot_ggiw_extent_at_(ax2, mu_ti, comp.V, comp.v, plot_dims, clr, alpha_fade, lw);
         end
 
-        % Marker at current position
         plot(ax2, hist(d1,end), hist(d2,end), 'o', 'Color', clr, ...
             'MarkerFaceColor', clr, 'MarkerSize', 6);
     end
 end
 
-% --- Panel 3: GGIW-GLMB (labeled tracks + extent snapshots along track history) ---
 ax3 = axes_h(3);
 if ~isempty(tracks_glmb)
     n_tracks = numel(tracks_glmb);
@@ -238,21 +225,17 @@ if ~isempty(tracks_glmb)
     for tr = 1:n_tracks
         states = tracks_glmb(tr).states;
         if numel(states) < 2, continue; end
-        xy = cell2mat(states);  % state_dim x T_track
+        xy = cell2mat(states);
         clr = track_colors(tr,:);
         T_tr = size(xy, 2);
 
-        % Full track path
         plot(ax3, xy(d1,:), xy(d2,:), '-', 'Color', clr, 'LineWidth', 1.5);
 
-        % Extent snapshots along track at regular intervals
         snap_idx = plot_every:plot_every:T_tr;
         if isempty(snap_idx) || snap_idx(end) ~= T_tr, snap_idx(end+1) = T_tr; end
-        % Find the matching GLMB component for extent (use final estimate)
         glmb_final = est_glmb{end};
         V_track = []; v_track = [];
         if ~isempty(glmb_final) && ~glmb_final.isempty()
-            % Use first available component's extent as proxy
             for ci = 1:glmb_final.length()
                 V_track = glmb_final.components{ci}.V;
                 v_track = glmb_final.components{ci}.v;
@@ -270,7 +253,6 @@ if ~isempty(tracks_glmb)
             end
         end
 
-        % Label at endpoint
         plot(ax3, xy(d1,end), xy(d2,end), 'o', 'Color', clr, ...
             'MarkerFaceColor', clr, 'MarkerSize', 6);
         text(ax3, xy(d1,end)+0.3, xy(d2,end)+0.3, ...
@@ -311,7 +293,6 @@ function x = propagate_si(dt, x, dims)
 end
 
 function plot_ggiw_extent_(ax, comp, dims, clr, alpha_val, lw)
-    %PLOT_GGIW_EXTENT_ Draw mean extent ellipse for a GGIW component.
     d = size(comp.V, 1);
     mu = comp.mean(dims);
     V2 = comp.V(dims, dims);
@@ -320,7 +301,6 @@ function plot_ggiw_extent_(ax, comp, dims, clr, alpha_val, lw)
 end
 
 function plot_ggiw_extent_at_(ax, mu, V, v, dims, clr, alpha_val, lw)
-    %PLOT_GGIW_EXTENT_AT_ Draw mean extent ellipse at a given position.
     d = size(V, 1);
     V2 = V(dims, dims);
     me = V2 / (v - d - 1);
